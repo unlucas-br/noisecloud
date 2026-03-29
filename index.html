@@ -1,0 +1,144 @@
+<!-- NoiseCloud Lite - PDF adaptado para HTML, feito utilizando o Gemini -->
+
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NoiseCloud: Artigo e Análise Técnica</title>
+    <link rel="stylesheet" href="css/style.css">
+    <style>
+        .article-section {
+            margin-bottom: 60px;
+        }
+
+        .article-section h1 {
+            color: var(--secondary-color);
+            border-bottom: 2px solid var(--primary-color);
+            padding-bottom: 10px;
+        }
+
+        .divider {
+            margin: 60px 0;
+            border: 0;
+            border-top: 2px dashed var(--border-color);
+        }
+    </style>
+</head>
+
+<body>
+    <div class="document-container">
+
+        <nav class="navbar">
+            <button onclick="showSection('article')" class="nav-btn active" id="btn-article">Artigo Pessoal</button>
+            <button onclick="showSection('report')" class="nav-btn" id="btn-report">Relatório Técnico</button>
+        </nav>
+
+        <section id="article-view" class="article-section">
+            <h1>Por Trás do NoiseCloud: IA, Criação de Conteúdo e Realidade Técnica</h1>
+
+            <p>Hoje eu vim aqui fazer o meu primeiro post e eu queria direcionar parte dele para o pessoal que "cria"
+                conteúdo na área de TI. (Nem sei se vai alcançar alguém rs)</p>
+
+            <p>Eu nunca divulguei isso para ninguém, a não ser em um report que fiz recentemente, mas eu venho
+                trabalhando no meu projeto, o <strong>noiseCryptCloud</strong>. É uma ferramenta que converte qualquer
+                tipo de arquivo em MP4, resistente à compressão agressiva permitindo recuperar o arquivo original sem
+                perder um único bit. Hoje eu posso dizer que todos os projetos desse nicho têm esse mesmo problema de
+                compressão de dados e exigência de processamento, inclusive esse do vídeo popular que irei mencionar,
+                mas consegui superar esses pontos.</p>
+
+            <p>Deixei um pouco o projeto de lado essas últimas semanas e deixei o código lá no GitHub. Ontem, eu estava
+                de boa ouvindo podcast e conversando com o Claudinho AI sobre umas ideias de implementação, quando
+                perguntei se algum projeto do meu nicho tinha atualizado (tinha feito uma lista com os mais populares).
+                Ele me sugeriu uma ferramenta nova. Fui ver o vídeo de divulgação e, meus amigos, 269 mil visualizações!
+                Um monte de animação, cálculo na tela, blocos desenhados... eu pensei, "Caramba, o cara resolveu tudo,
+                achei a solução!".</p>
+
+            <p>Mas quando eu abri o projeto... vi algumas coisas similares na construção, tipo de criptografia,
+                aplicação, etc. O que difere é o uso e a falsa implementação através do <em>full Vibe Coding</em>. Quem
+                já pediu para uma IA implementar algo sabe do que eu estou falando rs, nunca é para produção, sempre
+                fica buraco. Perguntei para o autor, no post dele, se ele tinha utilizado algum repo como suporte para
+                ver onde outros pararam, problemas que enfrentaram, o que deu certo nos projetos, e a resposta foi,
+                "...and this one wasn’t based on any external work." (Eu até acreditei, já que claramente quem buscou
+                tudo para o projeto foi a IA, rs).</p>
+
+            <p>O projeto dele está em C, pois utiliza uma biblioteca de recuperação nessa linguagem. Parece que adaptou
+                para C para conseguir usar o Wirehair, ou usou IA para trazer para uma linguagem familiar. Só que ficou
+                fora da realidade, já que o sistema main do cara é Windows (vídeo de demonstração no YT) e não Linux,
+                que seria o recomendado para a estrutura do projeto.</p>
+
+            <p>Nesse momento, caiu a ficha para mim do que realmente é criação de conteúdo, transparecimento de
+                imagem e conhecimento. Parece que não precisamos saber e aprender tudo, apenas ter domínio sobre
+                como passar isso para o público. Um exemplo clássico e que muitos vão concordar instantaneamente
+                (fugindo um pouco do assunto mas com o objetivo de falar sobre "vender seu peixe") é a relação
+                <em>Perfil no LinkedIn vs Realidade Profissional</em>, linguajar afiadíssimo na rede, palavras em
+                inglês para descrever tarefas simples do próprio português, forma de se portar e até falar sobre
+                toxicidade que, fora dos "muros" da rede, é totalmente o oposto.</p>
+
+            <p>Todo mundo usa IA no off, e está tudo certo. Eu usei no meu para dar um talento nos comentários para
+                deixar público, na formatação e na implementação de bibliotecas como Reed Solomon, pois nunca tinha
+                trabalhado com ela. Não te diminui usar tecnologia, o que te diminui é apagar a realidade.</p>
+
+            <p>E isso para mim foi o auge, pois mesmo que tenha sido dessa forma, o cara chegou longe e conseguiu fazer
+                o que publicamente todos que tentaram não conseguiram totalmente. Mesmo que seja uma PoC em forma de
+                projeto (pois é dessa forma que vejo), gerou um conteúdo sensacional, e isso é o que falta para os
+                falantes de língua portuguesa. Todo tipo de conteúdo que você vai pesquisar em português parece que as
+                pessoas usam o mesmo roteiro, pois são os mesmos comandos, cenários e softwares. Um exemplo simples,
+                abra o YouTube agora e pesquise "openclaw", diversos vídeos com o mesmo conteúdo, instalação, como algum
+                gringo faz mágicas com ele, mas praticamente ninguém consegue colocar um vídeo mostrando aplicação para
+                o uso real no dia a dia, o mais importante é fazer parte do hype e subir conteúdo baseado na procura.
+            </p>
+
+            <p>Não estou falando de um conteúdo avançado nem nada, até porque é algo gratuito. O problema é que esse
+                tipo de cultura de reproduzir o que o outro fez, ao invés de criar conteúdo, está presente até em cursos
+                pagos, que parecem vídeos gratuitos do YT. Na minha visão, falta conteúdo original com coisas novas,
+                estudos de caso, ambientes simulando tarefas do dia a dia, resolução de problemas reais em um ambiente
+                de produção, etc. Um pedido, se for reproduzir o que muitos já fizeram em português, busque uma
+                alternativa criativa que só tem na gringa e traga para o nosso idioma, pelo menos em coisas já
+                saturadas.</p>
+
+            <p>Para quem não entendeu o ponto ainda, vou deixar um curso excelente que foca nisso, a facilidade de
+                passar informação para o uso real, não para encher de palavras uma ementa que, em grande parte, não
+                serve para nada além de fazer volume e, consequentemente, agregar mais valor ao produto, vulgo curso.
+                Detalhe, o curso é totalmente gratuito no YouTube.<br><br>
+                <em><a href="https://www.youtube.com/watch?v=G7bMwefn8RQ" target="_blank" rel="noopener noreferrer">Curso do DevAprender de SQL, abra e veja os primeiros 15 minutos.</a></em>
+            </p>
+
+            <p>Para mim, o meme do "Eu sou a favor da pirataria" do Jones Manoel nunca fez tanto sentido kk. Precisamos
+                começar a trazer para o português conteúdos que faltam no nosso idioma, dessa forma, mais pessoas terão
+                acesso fácil e começaremos a ter mais vídeos sobre o assunto. Vou citar um tema para evidenciar esse
+                problema que enfrentamos ainda em 2026, algo presente e de extrema importância, conteúdo em português
+                sobre engenharia reversa, IDA Pro. Temos sorte de ter o Ghidra e ele movimentar a cena do QA, além do
+                lendário Cheat Engine, porque se não, não teríamos quase nada de conteúdo. Pesquise sobre esse tipo de
+                conteúdo no YT e até na Udemy, coloque o filtro em inglês e depois em português, veja a diferença da
+                quantidade, perceba que tem assunto que nem para o português existe.</p>
+
+            <p>Voltando para o meu projeto, quando fiz o report para a Google, eles perguntam se você tem a intenção de
+                postar sobre a vulnerabilidade/problema. Se sim, pedem uma data aproximada e a plataforma onde será
+                postado. Preenchi que iria postar aqui depois de um tempo do report, isso dá margem para a empresa se
+                preparar e corrigir as "falhas".</p>
+
+            <div class="reference" style="margin-top: 20px;">
+                <strong>Aviso:</strong><br>
+                Vou disponibilizar a versão lite, pois a versão completa é fora da realidade para uso público. O projeto
+                em si surgiu para a exploração da CVE-2020-12362 e emprego de esteganografia. Pensei muito antes de
+                postar qualquer coisa sobre, pois o mesmo pode ser usado para gerar arquivos de vídeo maliciosos e
+                utilizar infraestrutura segura como servidor C2. Por isso, a versão lite conta apenas com encode e
+                decode, sem nenhum tipo de criptografia no arquivo codificado. Use com responsabilidade. O software não
+                foi feito para ser usado contra nenhum serviço, mas, por questões técnicas, ele sobressai aos sistemas
+                de compressão dos serviços mais famosos.
+            </div>
+
+        </section>
+
+        <section id="app-view" style="display: none;">
+            Carregando análise técnica...
+        </section>
+
+    </div>
+
+    <script src="js/app.js"></script>
+</body>
+
+</html>
