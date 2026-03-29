@@ -1,0 +1,246 @@
+:root {
+    /* Cores atualizadas para o NoiseCloud Lite */
+    --primary-color: #0f766e;
+    --secondary-color: #111827;
+    --text-color: #333333;
+    --bg-color: #ffffff;
+    --code-bg: #f3f4f6;
+    --border-color: #e5e7eb;
+}
+
+body {
+    font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+    color: var(--text-color);
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 40px 20px;
+    background-color: #f9fafb;
+}
+
+.document-container {
+    background-color: var(--bg-color);
+    padding: 60px 80px;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+    border-radius: 8px;
+}
+
+h1 {
+    color: var(--secondary-color);
+    font-size: 2.2em;
+    border-bottom: 2px solid var(--primary-color);
+    padding-bottom: 10px;
+    margin-bottom: 30px;
+}
+
+h2 {
+    color: var(--primary-color);
+    font-size: 1.5em;
+    margin-top: 40px;
+    border-bottom: 1px solid var(--border-color);
+    padding-bottom: 8px;
+}
+
+h3 {
+    color: #4b5563;
+    font-size: 1.2em;
+    margin-top: 25px;
+}
+
+p {
+    margin-bottom: 15px;
+    text-align: justify;
+}
+
+ul {
+    margin-bottom: 15px;
+    padding-left: 20px;
+}
+
+li {
+    margin-bottom: 8px;
+}
+
+code {
+    background-color: var(--code-bg);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 0.9em;
+    color: #d97706;
+}
+
+.reference {
+    background-color: #f0fdfa;
+    border-left: 4px solid #14b8a6;
+    padding: 10px 15px;
+    margin: 15px 0;
+    font-size: 0.9em;
+    color: #0f766e;
+    font-family: monospace;
+}
+
+.highlight-box {
+    background-color: #f8fafc;
+    border: 1px solid #cbd5e1;
+    padding: 15px;
+    border-radius: 6px;
+    margin: 20px 0;
+}
+
+.highlight-title {
+    font-weight: bold;
+    color: #334155;
+    margin-bottom: 5px;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 15px;
+    margin-bottom: 25px;
+}
+
+th,
+td {
+    border: 1px solid var(--border-color);
+    padding: 10px;
+    text-align: left;
+}
+
+th {
+    background-color: #f8fafc;
+    color: #334155;
+    font-weight: bold;
+}
+
+/* Estilo  PDF */
+@media print {
+    body {
+        background-color: white;
+        padding: 0;
+    }
+
+    .document-container {
+        box-shadow: none;
+        padding: 0;
+        max-width: 100%;
+    }
+
+    @page {
+        size: A4;
+        margin: 2cm;
+    }
+
+    h1,
+    h2,
+    h3 {
+        page-break-after: avoid;
+    }
+
+    p,
+    ul,
+    .highlight-box,
+    .reference,
+    table {
+        page-break-inside: avoid;
+    }
+}
+
+/* Responsividade para Tablets e Celulares */
+@media screen and (max-width: 768px) {
+    body {
+        padding: 20px 10px;
+    }
+
+    .document-container {
+        padding: 40px 30px;
+    }
+
+    h1 {
+        font-size: 1.8em;
+    }
+
+    h2 {
+        font-size: 1.4em;
+    }
+
+    table {
+        display: block;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    table th, table td {
+        min-width: 120px;
+    }
+}
+
+@media screen and (max-width: 480px) {
+    body {
+        padding: 10px 5px;
+    }
+
+    .document-container {
+        padding: 25px 20px;
+        border-radius: 4px;
+        box-shadow: none; /* Em celular, já aproveita a tela toda */
+    }
+
+    h1 {
+        font-size: 1.5em;
+    }
+
+    h2 {
+        font-size: 1.25em;
+    }
+
+    .reference, .highlight-box {
+        padding: 10px;
+        font-size: 0.85em;
+    }
+}
+
+/* Navbar de Seções */
+.navbar {
+    display: flex;
+    justify-content: center;
+    gap: 15px;
+    margin-bottom: 30px;
+    border-bottom: 2px solid var(--border-color);
+    padding-bottom: 15px;
+}
+
+.nav-btn {
+    background: none;
+    border: 2px solid transparent;
+    font-size: 1.1em;
+    color: var(--text-color);
+    cursor: pointer;
+    padding: 10px 20px;
+    border-radius: 6px;
+    transition: all 0.3s;
+    font-weight: 500;
+}
+
+.nav-btn:hover {
+    background-color: var(--code-bg);
+}
+
+.nav-btn.active {
+    background-color: var(--primary-color);
+    color: white;
+    border-color: var(--primary-color);
+    box-shadow: 0 4px 6px -1px rgba(15, 118, 110, 0.2);
+}
+
+@media screen and (max-width: 480px) {
+    .navbar {
+        flex-direction: column;
+        gap: 10px;
+    }
+    
+    .nav-btn {
+        width: 100%;
+    }
+}
