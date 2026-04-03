@@ -8,7 +8,7 @@
 /_/ |_/\____/_/____/\___/  \____/_/\____/\__,_/\__,_/     
 ```
 
-O NoiseCloud Lite é uma ferramenta de Esteganografia em Vídeo. Ele permite esconder arquivos de qualquer formato dentro de vídeos comuns, utilizando os pixels dos frames como armazenamento binário.
+O NoiseCloud Lite é uma ferramenta de armazenamento de dados em vídeo via codificação visual. Ele converte arquivos de qualquer formato em fluxos de pixels, transformando dados binários em frames de ruído visual de alta densidade para armazenamento em plataformas de vídeo.
 
 Esta versão Lite foca na facilidade de uso, performance e interface interativa, priorizando a velocidade e a resiliência dos dados.
 
@@ -41,7 +41,7 @@ Para rodar o NoiseCloud Lite, você precisa apenas de:
 
 ## Como Usar
 
-Basta executar o comando abaixono cmd (precisa estar dentro da pasta):
+Basta executar o comando abaixo no cmd (precisa estar dentro da pasta):
 
 ```bash
 ncc
