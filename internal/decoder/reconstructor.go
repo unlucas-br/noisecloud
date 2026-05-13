@@ -20,9 +20,7 @@ import (
 type FrameReconstructor struct {
 	FrameCfg encoder.FrameConfig
 	ECCCfg   encoder.ECCConfig
-
-	cfgOnce   sync.Once
-	cfgScaled encoder.FrameConfig
+	Preset   string
 }
 
 // NewFrameReconstructor inicializa o reconstructor com configurações baseadas no preset.
@@ -36,12 +34,19 @@ func NewFrameReconstructor(preset string) *FrameReconstructor {
 		cfg = encoder.HighDensityFrameConfig()
 	} else if preset == "square" {
 		cfg = encoder.SquareFrameConfig()
+	} else if preset == "tiktok" {
+		cfg = encoder.TikTokFrameConfig()
+	}
+
+	eccCfg := encoder.NewECCConfig()
+	if preset == "tiktok" {
+		eccCfg = encoder.TikTokECCConfig()
 	}
 
 	return &FrameReconstructor{
-		FrameCfg:  cfg,
-		cfgScaled: cfg,
-		ECCCfg:    encoder.NewECCConfig(),
+		FrameCfg: cfg,
+		ECCCfg:   eccCfg,
+		Preset:   preset,
 	}
 }
 
@@ -63,7 +68,7 @@ type decodeResult struct {
 // ReconstructFile une os frames decodificados e aplica a correção de erro Reed-Solomon
 func (fr *FrameReconstructor) ReconstructFile(framePaths []string, outputPath string, progress chan<- float64) error {
 	var allData []byte
-	var crcWarnings int32
+	var eccWarnings int32
 
 	threads := runtime.NumCPU() - 2
 	if threads < 1 {
@@ -135,6 +140,7 @@ func (fr *FrameReconstructor) ReconstructFile(framePaths []string, outputPath st
 	}()
 
 	frameByIndex := make(map[uint32]decodeResult)
+	totalFrameVotes := make(map[uint32]int)
 	var processed int
 	var errCount int
 
@@ -147,7 +153,16 @@ func (fr *FrameReconstructor) ReconstructFile(framePaths []string, outputPath st
 			continue
 		}
 		if !res.crcOK {
-			atomic.AddInt32(&crcWarnings, 1)
+			atomic.AddInt32(&eccWarnings, 1)
+		}
+
+		if res.frameHeader.TotalFrames == 0 || res.frameHeader.FrameIndex >= res.frameHeader.TotalFrames {
+			errCount++
+			if errCount <= 3 {
+				fmt.Fprintf(os.Stderr, "Frame %d error: cabeçalho inconsistente (index=%d total=%d)\n",
+					res.index, res.frameHeader.FrameIndex, res.frameHeader.TotalFrames)
+			}
+			continue
 		}
 
 		fi := res.frameHeader.FrameIndex
@@ -158,6 +173,7 @@ func (fr *FrameReconstructor) ReconstructFile(framePaths []string, outputPath st
 		} else {
 			frameByIndex[fi] = res
 		}
+		totalFrameVotes[res.frameHeader.TotalFrames]++
 
 		processed++
 		if progress != nil {
@@ -177,14 +193,36 @@ func (fr *FrameReconstructor) ReconstructFile(framePaths []string, outputPath st
 
 	fmt.Println("Montando arquivo final...")
 
+	var expectedFrames uint32
+	var expectedVotes int
+	for total, votes := range totalFrameVotes {
+		if votes > expectedVotes {
+			expectedFrames = total
+			expectedVotes = votes
+		}
+	}
+
+	if expectedFrames > 0 {
+		for fi, res := range frameByIndex {
+			if res.frameHeader.TotalFrames != expectedFrames || fi >= expectedFrames {
+				delete(frameByIndex, fi)
+			}
+		}
+	}
+
 	var maxIdx uint32
-	for fi := range frameByIndex {
-		if fi > maxIdx {
-			maxIdx = fi
+	if expectedFrames > 0 {
+		maxIdx = expectedFrames - 1
+	} else {
+		for fi := range frameByIndex {
+			if fi > maxIdx {
+				maxIdx = fi
+			}
 		}
 	}
 
 	var missingFrames int
+	var unverifiedFrames int
 	for i := uint32(0); i <= maxIdx; i++ {
 		res, ok := frameByIndex[i]
 		if !ok {
@@ -194,6 +232,9 @@ func (fr *FrameReconstructor) ReconstructFile(framePaths []string, outputPath st
 			}
 			continue
 		}
+		if !res.crcOK {
+			unverifiedFrames++
+		}
 		allData = append(allData, res.data...)
 	}
 
@@ -201,11 +242,13 @@ func (fr *FrameReconstructor) ReconstructFile(framePaths []string, outputPath st
 		fmt.Fprintf(os.Stderr, "\n❌ AVISO: %d frames faltando!\n", missingFrames)
 	}
 
-	if crcWarnings > 0 {
-		fmt.Fprintf(os.Stderr, "\nTotal CRC warnings: %d/%d frames\n", crcWarnings, len(framePaths))
+	if unverifiedFrames > 0 {
+		fmt.Fprintf(os.Stderr, "\nAviso ECC: %d frame(s) usados sem verificação íntegra\n", unverifiedFrames)
+	} else if eccWarnings > 0 {
+		fmt.Fprintf(os.Stderr, "\nAviso ECC: %d candidato(s) recuperado(s) por tentativa alternativa\n", eccWarnings)
 	}
 
-	fmt.Println("✅ Arquivo reconstruído com sucesso")
+	fmt.Println("✅ Payload bruto reconstruído")
 	return os.WriteFile(outputPath, allData, 0644)
 }
 
@@ -214,7 +257,13 @@ func verifySHA256(data []byte, expected []byte) bool {
 	return bytes.Equal(hash[:], expected)
 }
 
-// processFrame converte o PNG de volta em dados binários brutos (Luma/Differential)
+type frameCandidate struct {
+	data   []byte
+	header ParsedHeader
+	eccOK  bool
+}
+
+// processFrame converte o PNG de volta em dados binários brutos.
 func (fr *FrameReconstructor) processFrame(path string) ([]byte, ParsedHeader, bool, error) {
 	var emptyHeader ParsedHeader
 
@@ -229,132 +278,340 @@ func (fr *FrameReconstructor) processFrame(path string) ([]byte, ParsedHeader, b
 		return nil, emptyHeader, false, fmt.Errorf("falha ao decodificar png: %w", err)
 	}
 
-	localCfg := fr.getScaledConfig(img.Bounds())
-
-	threshold, _ := calibrateFrame(img, localCfg)
-	if threshold == 0 {
-		threshold = 128
+	type attempt struct {
+		isDiff    bool
+		calAdjust int
+		offX      int
+		offY      int
+		thrAdjust int
 	}
-	levels, _ := calibrateLevels(img, localCfg)
 
-	extractionMethods := []bool{false, true}
+	attempts := []attempt{
+		{false, 0, 0, 0, 0},
+		{false, 0, 0, -1, 0},
+		{false, 0, 0, 1, 0},
+		{false, 0, -1, 0, 0},
+		{false, 0, 1, 0, 0},
+		{false, -1, 0, 0, 0},
+		{false, +1, 0, 0, 0},
+		{false, 0, 0, 0, -10},
+		{false, 0, 0, 0, +10},
+		{false, 0, 0, 0, -20},
+		{false, 0, 0, 0, +20},
+		{true, 0, 0, 0, 0},
+	}
+
+	var fallback *frameCandidate
 	var lastErr error
 
-	for _, isDiff := range extractionMethods {
-		allBytes, err := readBytesFromImage(img, localCfg, threshold, levels, 0, 0, isDiff)
-		if err != nil {
-			lastErr = err
-			continue
+	for _, baseCfg := range fr.candidateFrameConfigs() {
+		localCfg := getScaledConfigFor(baseCfg, img.Bounds())
+
+		threshold, _ := calibrateFrame(img, localCfg)
+		if threshold == 0 {
+			threshold = 128
 		}
+		levels, _ := calibrateLevels(img, localCfg)
 
-		cols, rows := localCfg.GridSize()
-		totalMacros := cols * rows
-		bytesInFrame := totalMacros / (8 / localCfg.GrayLevels)
+		for _, a := range attempts {
+			tryCfg := localCfg
+			if a.calAdjust != 0 {
+				tryCfg.CalibrationHeight += a.calAdjust * localCfg.MacroSize
+				if tryCfg.CalibrationHeight < 0 || tryCfg.CalibrationHeight >= img.Bounds().Dy() {
+					continue
+				}
+			}
 
-		if bytesInFrame > len(allBytes) {
-			bytesInFrame = len(allBytes)
-		}
-
-		eccCfg := fr.ECCCfg
-		ecc, err := encoder.NewECCEncoder(eccCfg)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-
-		totalShards := eccCfg.DataShards + eccCfg.ParityShards
-		maxShardSize := bytesInFrame / totalShards
-		eccBytes := maxShardSize * totalShards
-
-		if eccBytes > len(allBytes) {
-			lastErr = fmt.Errorf("dados insuficientes para fragmentos (shards)")
-			continue
-		}
-
-		shardsData := allBytes[:eccBytes]
-		shards := make([][]byte, totalShards)
-		for i := range shards {
-			shards[i] = shardsData[i*maxShardSize : (i+1)*maxShardSize]
-		}
-
-		var crcOK bool
-		crcOK = true
-		ok, _ := ecc.Verify(shards)
-		if !ok {
-			crcOK = false
-			if err := ecc.Reconstruct(shards); err != nil {
-				lastErr = fmt.Errorf("ECC irrecuperável: %w", err)
+			tryThreshold := adjustThreshold(threshold, a.thrAdjust)
+			allBytes, err := readBytesFromImage(img, baseCfg, tryCfg, tryThreshold, levels, a.offX, a.offY, a.isDiff)
+			if err != nil {
+				lastErr = err
 				continue
 			}
+
+			bytesInFrame := baseCfg.TotalBytesCapacity()
+			if bytesInFrame > len(allBytes) {
+				bytesInFrame = len(allBytes)
+			}
+
+			for _, eccCfg := range fr.candidateECCConfigs(baseCfg) {
+				candidate, err := fr.tryDecodePayload(allBytes, bytesInFrame, eccCfg)
+				if err != nil {
+					lastErr = err
+					continue
+				}
+
+				if candidate.eccOK {
+					return candidate.data, candidate.header, true, nil
+				}
+				if fallback == nil {
+					copied := candidate
+					fallback = &copied
+				}
+			}
 		}
-
-		fullPayload, err := ecc.Join(shards, maxShardSize*eccCfg.DataShards)
-		if err != nil {
-			lastErr = fmt.Errorf("falha ao unir dados do ECC: %w", err)
-			continue
-		}
-
-		plaintext := fullPayload
-
-		if len(plaintext) < encoder.FramePlainHeaderSize {
-			lastErr = fmt.Errorf("dados do frame muito pequenos para o cabeçalho")
-			continue
-		}
-
-		var header ParsedHeader
-		copy(header.Magic[:], plaintext[0:4])
-		if header.Magic != [4]byte{'N', 'C', 'C', '3'} {
-			lastErr = fmt.Errorf("magic inválido no quadro decodificado: %v", header.Magic)
-			continue
-		}
-
-		header.FrameIndex = binary.BigEndian.Uint32(plaintext[4:8])
-		header.TotalFrames = binary.BigEndian.Uint32(plaintext[8:12])
-		header.DataSize = binary.BigEndian.Uint32(plaintext[12:16])
-
-		payloadStart := encoder.FramePlainHeaderSize
-		payloadEnd := payloadStart + int(header.DataSize)
-
-		if payloadEnd > len(plaintext) {
-			lastErr = fmt.Errorf("tamanho de dados corrompido")
-			continue
-		}
-
-		actualData := make([]byte, header.DataSize)
-		copy(actualData, plaintext[payloadStart:payloadEnd])
-
-		return actualData, header, crcOK, nil
 	}
 
+	if fallback != nil {
+		return fallback.data, fallback.header, false, nil
+	}
 	return nil, emptyHeader, false, lastErr
 }
 
-func (fr *FrameReconstructor) getScaledConfig(bounds image.Rectangle) encoder.FrameConfig {
-	w, h := bounds.Dx(), bounds.Dy()
-
-	if w == fr.FrameCfg.Width && h == fr.FrameCfg.Height {
-		return fr.FrameCfg
+func (fr *FrameReconstructor) tryDecodePayload(allBytes []byte, bytesInFrame int, eccCfg encoder.ECCConfig) (frameCandidate, error) {
+	totalShards := eccCfg.DataShards + eccCfg.ParityShards
+	maxShardSize := bytesInFrame / totalShards
+	if maxShardSize == 0 {
+		return frameCandidate{}, fmt.Errorf("capacidade insuficiente para fragmentos ECC")
 	}
 
-	fr.cfgOnce.Do(func() {
-		scaled := fr.FrameCfg
-		origW := scaled.Width
-		if origW > 0 {
-			scaled.MacroSize = (scaled.MacroSize*w + origW/2) / origW
-			scaled.CalibrationHeight = (scaled.CalibrationHeight*w + origW/2) / origW
-			if scaled.MacroSize < 4 {
-				scaled.MacroSize = 4
-			}
-			if scaled.CalibrationHeight < 4 {
-				scaled.CalibrationHeight = 4
-			}
-		}
-		scaled.Width = w
-		scaled.Height = h
-		fr.cfgScaled = scaled
-	})
+	eccBytes := maxShardSize * totalShards
+	if eccBytes > len(allBytes) {
+		return frameCandidate{}, fmt.Errorf("dados insuficientes para fragmentos (shards)")
+	}
 
-	return fr.cfgScaled
+	ecc, err := encoder.NewECCEncoder(eccCfg)
+	if err != nil {
+		return frameCandidate{}, err
+	}
+
+	shards := splitShards(allBytes[:eccBytes], totalShards, maxShardSize)
+	ok, _ := ecc.Verify(shards)
+	if ok {
+		fullPayload, err := ecc.Join(shards, maxShardSize*eccCfg.DataShards)
+		if err != nil {
+			return frameCandidate{}, fmt.Errorf("falha ao unir dados do ECC: %w", err)
+		}
+		header, data, err := parsePlainFrame(fullPayload, maxShardSize*eccCfg.DataShards)
+		if err != nil {
+			return frameCandidate{}, err
+		}
+		return frameCandidate{data: data, header: header, eccOK: true}, nil
+	}
+
+	fullPayload, err := ecc.Join(shards, maxShardSize*eccCfg.DataShards)
+	if err != nil {
+		return frameCandidate{}, fmt.Errorf("falha ao unir dados do ECC: %w", err)
+	}
+
+	header, data, err := parsePlainFrame(fullPayload, maxShardSize*eccCfg.DataShards)
+	if err != nil {
+		return frameCandidate{}, err
+	}
+
+	maxRepairErasures := eccCfg.ParityShards
+	if maxRepairErasures > 6 {
+		maxRepairErasures = 4
+	}
+	if repairCorruptShards(ecc, shards, maxRepairErasures) {
+		fullPayload, err = ecc.Join(shards, maxShardSize*eccCfg.DataShards)
+		if err != nil {
+			return frameCandidate{}, fmt.Errorf("falha ao unir dados do ECC reparado: %w", err)
+		}
+		repairedHeader, repairedData, err := parsePlainFrame(fullPayload, maxShardSize*eccCfg.DataShards)
+		if err != nil {
+			return frameCandidate{}, err
+		}
+		return frameCandidate{data: repairedData, header: repairedHeader, eccOK: true}, nil
+	}
+
+	return frameCandidate{data: data, header: header, eccOK: false}, nil
+}
+
+func parsePlainFrame(plaintext []byte, maxDataBytes int) (ParsedHeader, []byte, error) {
+	var header ParsedHeader
+	if len(plaintext) < encoder.FramePlainHeaderSize {
+		return header, nil, fmt.Errorf("dados do frame muito pequenos para o cabeçalho")
+	}
+
+	copy(header.Magic[:], plaintext[0:4])
+	if header.Magic != [4]byte{'N', 'C', 'C', '3'} {
+		return header, nil, fmt.Errorf("magic inválido no quadro decodificado: %v", header.Magic)
+	}
+
+	header.FrameIndex = binary.BigEndian.Uint32(plaintext[4:8])
+	header.TotalFrames = binary.BigEndian.Uint32(plaintext[8:12])
+	header.DataSize = binary.BigEndian.Uint32(plaintext[12:16])
+
+	maxPayloadBytes := maxDataBytes - encoder.FramePlainHeaderSize
+	if maxPayloadBytes < 0 {
+		return header, nil, fmt.Errorf("capacidade negativa para payload")
+	}
+	if header.TotalFrames == 0 || header.FrameIndex >= header.TotalFrames {
+		return header, nil, fmt.Errorf("cabeçalho inconsistente")
+	}
+	if int(header.DataSize) > maxPayloadBytes {
+		return header, nil, fmt.Errorf("tamanho de dados corrompido")
+	}
+
+	payloadStart := encoder.FramePlainHeaderSize
+	payloadEnd := payloadStart + int(header.DataSize)
+	if payloadEnd > len(plaintext) {
+		return header, nil, fmt.Errorf("tamanho de dados corrompido")
+	}
+
+	actualData := make([]byte, header.DataSize)
+	copy(actualData, plaintext[payloadStart:payloadEnd])
+	return header, actualData, nil
+}
+
+func splitShards(data []byte, totalShards int, shardSize int) [][]byte {
+	shards := make([][]byte, totalShards)
+	for i := range shards {
+		shards[i] = data[i*shardSize : (i+1)*shardSize]
+	}
+	return shards
+}
+
+func repairCorruptShards(ecc *encoder.ECCEncoder, shards [][]byte, maxErasures int) bool {
+	if ok, _ := ecc.Verify(shards); ok {
+		return true
+	}
+	if maxErasures > len(shards) {
+		maxErasures = len(shards)
+	}
+
+	for erased := 1; erased <= maxErasures; erased++ {
+		combo := make([]int, 0, erased)
+		if tryShardErasures(ecc, shards, combo, erased, 0) {
+			return true
+		}
+	}
+	return false
+}
+
+func tryShardErasures(ecc *encoder.ECCEncoder, original [][]byte, combo []int, target, start int) bool {
+	if len(combo) == target {
+		candidate := cloneShards(original)
+		for _, idx := range combo {
+			candidate[idx] = nil
+		}
+		if err := ecc.Reconstruct(candidate); err != nil {
+			return false
+		}
+		if ok, _ := ecc.Verify(candidate); !ok {
+			return false
+		}
+		for i := range original {
+			copy(original[i], candidate[i])
+		}
+		return true
+	}
+
+	remaining := target - len(combo)
+	for i := start; i <= len(original)-remaining; i++ {
+		combo = append(combo, i)
+		if tryShardErasures(ecc, original, combo, target, i+1) {
+			return true
+		}
+		combo = combo[:len(combo)-1]
+	}
+	return false
+}
+
+func cloneShards(shards [][]byte) [][]byte {
+	cloned := make([][]byte, len(shards))
+	for i, shard := range shards {
+		if shard == nil {
+			continue
+		}
+		cloned[i] = make([]byte, len(shard))
+		copy(cloned[i], shard)
+	}
+	return cloned
+}
+
+func adjustThreshold(base byte, delta int) byte {
+	v := int(base) + delta
+	if v < 0 {
+		return 0
+	}
+	if v > 255 {
+		return 255
+	}
+	return byte(v)
+}
+
+func (fr *FrameReconstructor) candidateFrameConfigs() []encoder.FrameConfig {
+	candidates := []encoder.FrameConfig{fr.FrameCfg}
+	if fr.Preset == "tiktok" {
+		candidates = append(candidates, encoder.HQFrameConfig(), encoder.DefaultFrameConfig(), encoder.SquareFrameConfig())
+	} else if fr.Preset == "hq" {
+		candidates = append(candidates, encoder.TikTokFrameConfig())
+	}
+
+	seen := make(map[encoder.FrameConfig]bool)
+	unique := make([]encoder.FrameConfig, 0, len(candidates))
+	for _, cfg := range candidates {
+		if seen[cfg] {
+			continue
+		}
+		seen[cfg] = true
+		unique = append(unique, cfg)
+	}
+	return unique
+}
+
+func (fr *FrameReconstructor) candidateECCConfigs(baseCfg encoder.FrameConfig) []encoder.ECCConfig {
+	candidates := []encoder.ECCConfig{fr.ECCCfg}
+	if baseCfg == encoder.TikTokFrameConfig() {
+		candidates = append(candidates, encoder.TikTokECCConfig())
+	} else {
+		candidates = append(candidates, encoder.NewECCConfig())
+	}
+	candidates = append(candidates, encoder.NewECCConfig(), encoder.TikTokECCConfig())
+
+	seen := make(map[encoder.ECCConfig]bool)
+	unique := make([]encoder.ECCConfig, 0, len(candidates))
+	for _, cfg := range candidates {
+		if seen[cfg] {
+			continue
+		}
+		seen[cfg] = true
+		unique = append(unique, cfg)
+	}
+	return unique
+}
+
+// getScaledConfig recalcula as configurações de grade para as dimensões reais do frame.
+// O TikTok redimensiona vídeos (ex: 1080→576, 1920→1024), então os parâmetros precisam
+// ser ajustados proporcionalmente para cada frame decodificado.
+// MacroSize é escalonado pela largura; CalibrationHeight é escalonado pela ALTURA,
+// pois a barra de calibração ocupa espaço vertical e os dados começam abaixo dela.
+func (fr *FrameReconstructor) getScaledConfig(bounds image.Rectangle) encoder.FrameConfig {
+	return getScaledConfigFor(fr.FrameCfg, bounds)
+}
+
+func getScaledConfigFor(base encoder.FrameConfig, bounds image.Rectangle) encoder.FrameConfig {
+	w, h := bounds.Dx(), bounds.Dy()
+
+	if w == base.Width && h == base.Height {
+		return base
+	}
+
+	scaled := base
+	origW := base.Width
+	origH := base.Height
+
+	if origW > 0 {
+		// MacroSize escala pela largura (os pixels de dados são quadrados)
+		scaled.MacroSize = (scaled.MacroSize*w + origW/2) / origW
+		if scaled.MacroSize < 4 {
+			scaled.MacroSize = 4
+		}
+	}
+
+	if origH > 0 {
+		// CalibrationHeight escala pela ALTURA, pois é uma faixa horizontal
+		scaled.CalibrationHeight = (scaled.CalibrationHeight*h + origH/2) / origH
+		if scaled.CalibrationHeight < 4 {
+			scaled.CalibrationHeight = 4
+		}
+	}
+
+	scaled.Width = w
+	scaled.Height = h
+	return scaled
 }
 
 func calibrateFrame(img image.Image, cfg encoder.FrameConfig) (byte, error) {
@@ -498,9 +755,8 @@ func extractDifferentialMacroPixel(img image.Image, cfg encoder.FrameConfig, sta
 	return 0
 }
 
-func readBytesFromImage(img image.Image, cfg encoder.FrameConfig, threshold byte, thresholds [3]uint8, offX, offY int, differential bool) ([]byte, error) {
-	cols, rows := cfg.GridSize()
-	macroSize := cfg.MacroSize
+func readBytesFromImage(img image.Image, baseCfg, scaledCfg encoder.FrameConfig, threshold byte, thresholds [3]uint8, offX, offY int, differential bool) ([]byte, error) {
+	cols, rows := baseCfg.GridSize()
 
 	var bits []byte
 	type coord struct{ x, y int }
@@ -512,16 +768,15 @@ func readBytesFromImage(img image.Image, cfg encoder.FrameConfig, threshold byte
 	}
 
 	for _, c := range coords {
-		targetX := c.x*macroSize + offX
-		targetY := c.y*macroSize + offY
+		x0, y0, x1, y1 := scaledMacroBounds(img.Bounds(), baseCfg, scaledCfg, c.x, c.y, offX, offY)
 
 		var val byte
 		if differential {
-			val = extractDifferentialMacroPixel(img, cfg, targetX, targetY)
+			val = extractDifferentialMacroPixelRect(img, x0, y0, x1, y1)
 		} else {
-			avgY, _, _ := extractMacroPixel(img, cfg, targetX, targetY)
+			avgY := extractMacroPixelRect(img, x0, y0, x1, y1)
 
-			if cfg.GrayLevels == 2 {
+			if baseCfg.GrayLevels == 2 {
 				if avgY >= threshold {
 					val = 1
 				} else {
@@ -535,7 +790,7 @@ func readBytesFromImage(img image.Image, cfg encoder.FrameConfig, threshold byte
 	}
 
 	var allBytes []byte
-	if cfg.GrayLevels == 2 {
+	if baseCfg.GrayLevels == 2 {
 		for i := 0; i+7 < len(bits); i += 8 {
 			b := (bits[i] << 7) | (bits[i+1] << 6) | (bits[i+2] << 5) | (bits[i+3] << 4) |
 				(bits[i+4] << 3) | (bits[i+5] << 2) | (bits[i+6] << 1) | bits[i+7]
@@ -548,4 +803,127 @@ func readBytesFromImage(img image.Image, cfg encoder.FrameConfig, threshold byte
 		}
 	}
 	return allBytes, nil
+}
+
+func scaledMacroBounds(bounds image.Rectangle, baseCfg, scaledCfg encoder.FrameConfig, col, row, offX, offY int) (int, int, int, int) {
+	w, h := bounds.Dx(), bounds.Dy()
+	scaleX := float64(w) / float64(baseCfg.Width)
+
+	baseDataHeight := baseCfg.Height - baseCfg.CalibrationHeight
+	scaledDataHeight := h - scaledCfg.CalibrationHeight
+	scaleY := float64(scaledDataHeight) / float64(baseDataHeight)
+	if baseDataHeight <= 0 || scaledDataHeight <= 0 {
+		scaleY = float64(h) / float64(baseCfg.Height)
+	}
+
+	x0 := int(math.Round(float64(col*baseCfg.MacroSize)*scaleX)) + offX
+	x1 := int(math.Round(float64((col+1)*baseCfg.MacroSize)*scaleX)) + offX
+	y0 := scaledCfg.CalibrationHeight + int(math.Round(float64(row*baseCfg.MacroSize)*scaleY)) + offY
+	y1 := scaledCfg.CalibrationHeight + int(math.Round(float64((row+1)*baseCfg.MacroSize)*scaleY)) + offY
+
+	x0 = clampInt(x0, 0, w)
+	x1 = clampInt(x1, 0, w)
+	y0 = clampInt(y0, 0, h)
+	y1 = clampInt(y1, 0, h)
+
+	if x1 <= x0 {
+		x1 = clampInt(x0+1, 0, w)
+	}
+	if y1 <= y0 {
+		y1 = clampInt(y0+1, 0, h)
+	}
+	return x0, y0, x1, y1
+}
+
+func extractMacroPixelRect(img image.Image, x0, y0, x1, y1 int) uint8 {
+	x0, y0, x1, y1 = insetSampleRect(x0, y0, x1, y1)
+	bounds := img.Bounds()
+
+	var sum uint32
+	var count uint32
+	for y := y0; y < y1; y++ {
+		for x := x0; x < x1; x++ {
+			r, _, _, _ := img.At(bounds.Min.X+x, bounds.Min.Y+y).RGBA()
+			sum += r >> 8
+			count++
+		}
+	}
+	if count == 0 {
+		return 128
+	}
+	return uint8(sum / count)
+}
+
+func extractDifferentialMacroPixelRect(img image.Image, x0, y0, x1, y1 int) byte {
+	x0, y0, x1, y1 = insetSampleRect(x0, y0, x1, y1)
+	bounds := img.Bounds()
+	midX := x0 + (x1-x0)/2
+
+	var leftSum uint32
+	var rightSum uint32
+	var leftCount uint32
+	var rightCount uint32
+
+	for y := y0; y < y1; y++ {
+		for x := x0; x < x1; x++ {
+			r, _, _, _ := img.At(bounds.Min.X+x, bounds.Min.Y+y).RGBA()
+			brightness := r >> 8
+			if x < midX {
+				leftSum += brightness
+				leftCount++
+			} else {
+				rightSum += brightness
+				rightCount++
+			}
+		}
+	}
+
+	if leftCount == 0 || rightCount == 0 {
+		return 0
+	}
+
+	leftAvg := float64(leftSum) / float64(leftCount)
+	rightAvg := float64(rightSum) / float64(rightCount)
+	avgLuma := (leftAvg + rightAvg) / 2.0
+	lumaFactor := 1.0 - math.Pow((avgLuma-128)/128, 2)
+	if lumaFactor < 0.25 {
+		lumaFactor = 0.25
+	}
+
+	expectedDelta := 20.0 * lumaFactor
+	target1Left := avgLuma + expectedDelta
+	target1Right := avgLuma - expectedDelta
+	target0Left := avgLuma - expectedDelta
+	target0Right := avgLuma + expectedDelta
+
+	distTo1 := math.Abs(leftAvg-target1Left) + math.Abs(rightAvg-target1Right)
+	distTo0 := math.Abs(leftAvg-target0Left) + math.Abs(rightAvg-target0Right)
+	if distTo1 < distTo0 {
+		return 1
+	}
+	return 0
+}
+
+func insetSampleRect(x0, y0, x1, y1 int) (int, int, int, int) {
+	w := x1 - x0
+	h := y1 - y0
+	marginX := w / 4
+	marginY := h / 4
+	if w-2*marginX < 2 {
+		marginX = 0
+	}
+	if h-2*marginY < 2 {
+		marginY = 0
+	}
+	return x0 + marginX, y0 + marginY, x1 - marginX, y1 - marginY
+}
+
+func clampInt(v, min, max int) int {
+	if v < min {
+		return min
+	}
+	if v > max {
+		return max
+	}
+	return v
 }
