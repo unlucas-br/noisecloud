@@ -49,13 +49,20 @@ func NewVideoEncoder(threads int, preset string, gpu string, frameKey []byte) (*
 		frameCfg = HighDensityFrameConfig()
 	} else if preset == "square" {
 		frameCfg = SquareFrameConfig()
+	} else if preset == "tiktok" {
+		frameCfg = TikTokFrameConfig()
 	} else if preset == "fast" {
 		frameCfg = DefaultFrameConfig()
 	}
 
+	eccCfg := NewECCConfig()
+	if preset == "tiktok" {
+		eccCfg = TikTokECCConfig()
+	}
+
 	return &VideoEncoder{
 		FrameCfg: frameCfg,
-		ECCCfg:   NewECCConfig(),
+		ECCCfg:   eccCfg,
 		TempDir:  tempDir,
 		Threads:  threads,
 		GPU:      gpu,
@@ -434,7 +441,11 @@ func (ve *VideoEncoder) StartFFmpegPipe(outputPath string, totalFrames int) (*ex
 	}
 
 	if videoCodec == "libx264" {
-		if ve.Preset == "fast" {
+		if ve.Preset == "tiktok" {
+			// CRF 15 = alta qualidade; slow = melhor compressão sem perdas visuais.
+			// Fundamental para que o recompressor do TikTok não corrumpa os pixels de dados.
+			args = append(args, "-preset", "slow", "-crf", "15")
+		} else if ve.Preset == "fast" {
 			args = append(args, "-preset", "ultrafast", "-crf", "18")
 		} else {
 			args = append(args, "-preset", "slow", "-crf", "18")
@@ -442,9 +453,13 @@ func (ve *VideoEncoder) StartFFmpegPipe(outputPath string, totalFrames int) (*ex
 	} else {
 		args = append(args, gpuFlags...)
 		if videoCodec == "h264_nvenc" {
-			args = append(args, "-cq", "20")
+			if ve.Preset == "tiktok" {
+				args = append(args, "-cq", "15")
+			} else {
+				args = append(args, "-cq", "20")
+			}
 		} else {
-			args = append(args, "-b:v", "8M") 
+			args = append(args, "-b:v", "8M")
 		}
 	}
 
