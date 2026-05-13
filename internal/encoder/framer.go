@@ -8,8 +8,8 @@ import (
 )
 
 const (
-	FramePlainHeaderSize = 16 
-	CalibrationBarHeight = 16 
+	FramePlainHeaderSize = 16
+	CalibrationBarHeight = 16
 )
 
 type FrameConfig struct {
@@ -17,8 +17,8 @@ type FrameConfig struct {
 	Height            int
 	MacroSize         int
 	FPS               int
-	CalibrationHeight int 
-	GrayLevels        int 
+	CalibrationHeight int
+	GrayLevels        int
 }
 
 func (fc FrameConfig) TotalBytesCapacity() int {
@@ -134,7 +134,7 @@ func (fc FrameConfig) CapacityPerFrame(eccCfg ECCConfig) int {
 
 type Frame struct {
 	Config FrameConfig
-	Data   []byte 
+	Data   []byte
 	ECC    *ECCEncoder
 }
 
@@ -159,7 +159,27 @@ func (f *Frame) Render(pixels []MacroPixel) ([]MacroPixel, error) {
 	cols, rows := f.Config.GridSize()
 	totalMacros := cols * rows
 
-	shards, err := f.ECC.Encode(f.Data)
+	maxBytes := f.Config.TotalBytesCapacity()
+	totalShards := f.ECC.Config.DataShards + f.ECC.Config.ParityShards
+	if totalShards <= 0 {
+		return nil, fmt.Errorf("configuração ECC inválida")
+	}
+	shardSize := maxBytes / totalShards
+	dataCapacity := shardSize * f.ECC.Config.DataShards
+	if dataCapacity <= 0 {
+		return nil, fmt.Errorf("capacidade ECC insuficiente para o quadro")
+	}
+	if len(f.Data) > dataCapacity {
+		return nil, fmt.Errorf("dados excedem a capacidade do quadro: %d bytes > %d max", len(f.Data), dataCapacity)
+	}
+
+	dataForECC := make([]byte, dataCapacity)
+	copy(dataForECC, f.Data)
+	if len(f.Data) < len(dataForECC) {
+		rand.Read(dataForECC[len(f.Data):])
+	}
+
+	shards, err := f.ECC.Encode(dataForECC)
 	if err != nil {
 		return nil, fmt.Errorf("codificação ECC falhou: %w", err)
 	}
@@ -168,8 +188,6 @@ func (f *Frame) Render(pixels []MacroPixel) ([]MacroPixel, error) {
 	for _, shard := range shards {
 		allBytes = append(allBytes, shard...)
 	}
-
-	maxBytes := f.Config.TotalBytesCapacity()
 
 	if len(allBytes) < maxBytes {
 		padding := make([]byte, maxBytes-len(allBytes))
@@ -182,9 +200,9 @@ func (f *Frame) Render(pixels []MacroPixel) ([]MacroPixel, error) {
 	}
 
 	if cap(pixels) < totalMacros {
-		pixels = make([]MacroPixel, totalMacros) 
+		pixels = make([]MacroPixel, totalMacros)
 	}
-	pixels = pixels[:totalMacros] 
+	pixels = pixels[:totalMacros]
 
 	pixelsPerByte := 4
 	if f.Config.GrayLevels == 2 {
@@ -225,5 +243,3 @@ func (f *Frame) Render(pixels []MacroPixel) ([]MacroPixel, error) {
 
 	return pixels, nil
 }
-
-

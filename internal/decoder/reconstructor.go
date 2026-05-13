@@ -365,7 +365,50 @@ func (fr *FrameReconstructor) tryDecodePayload(allBytes []byte, bytesInFrame int
 		return frameCandidate{}, fmt.Errorf("capacidade insuficiente para fragmentos ECC")
 	}
 
-	eccBytes := maxShardSize * totalShards
+	var fallback *frameCandidate
+	var lastErr error
+	minShardSize := (encoder.FramePlainHeaderSize + eccCfg.DataShards - 1) / eccCfg.DataShards
+	for shardSize := maxShardSize; shardSize >= minShardSize; shardSize-- {
+		candidate, err := fr.tryDecodePayloadAtShardSize(allBytes, totalShards, shardSize, eccCfg, false)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if candidate.eccOK {
+			return candidate, nil
+		}
+		if fallback == nil {
+			copied := candidate
+			fallback = &copied
+		}
+	}
+
+	for shardSize := maxShardSize; shardSize >= minShardSize; shardSize-- {
+		candidate, err := fr.tryDecodePayloadAtShardSize(allBytes, totalShards, shardSize, eccCfg, true)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if candidate.eccOK {
+			return candidate, nil
+		}
+		if fallback == nil {
+			copied := candidate
+			fallback = &copied
+		}
+	}
+
+	if fallback != nil {
+		return *fallback, nil
+	}
+	if lastErr != nil {
+		return frameCandidate{}, lastErr
+	}
+	return frameCandidate{}, fmt.Errorf("falha ao decodificar quadro")
+}
+
+func (fr *FrameReconstructor) tryDecodePayloadAtShardSize(allBytes []byte, totalShards, shardSize int, eccCfg encoder.ECCConfig, allowRepair bool) (frameCandidate, error) {
+	eccBytes := shardSize * totalShards
 	if eccBytes > len(allBytes) {
 		return frameCandidate{}, fmt.Errorf("dados insuficientes para fragmentos (shards)")
 	}
@@ -375,28 +418,42 @@ func (fr *FrameReconstructor) tryDecodePayload(allBytes []byte, bytesInFrame int
 		return frameCandidate{}, err
 	}
 
-	shards := splitShards(allBytes[:eccBytes], totalShards, maxShardSize)
+	shards := splitShards(allBytes[:eccBytes], totalShards, shardSize)
 	ok, _ := ecc.Verify(shards)
 	if ok {
-		fullPayload, err := ecc.Join(shards, maxShardSize*eccCfg.DataShards)
+		fullPayload, err := ecc.Join(shards, shardSize*eccCfg.DataShards)
 		if err != nil {
 			return frameCandidate{}, fmt.Errorf("falha ao unir dados do ECC: %w", err)
 		}
-		header, data, err := parsePlainFrame(fullPayload, maxShardSize*eccCfg.DataShards)
+		header, data, err := parsePlainFrame(fullPayload, shardSize*eccCfg.DataShards)
 		if err != nil {
 			return frameCandidate{}, err
 		}
 		return frameCandidate{data: data, header: header, eccOK: true}, nil
 	}
 
-	fullPayload, err := ecc.Join(shards, maxShardSize*eccCfg.DataShards)
+	fullPayload, err := ecc.Join(shards, shardSize*eccCfg.DataShards)
 	if err != nil {
 		return frameCandidate{}, fmt.Errorf("falha ao unir dados do ECC: %w", err)
 	}
 
-	header, data, err := parsePlainFrame(fullPayload, maxShardSize*eccCfg.DataShards)
-	if err != nil {
-		return frameCandidate{}, err
+	var fallback *frameCandidate
+	var parseErr error
+	header, data, err := parsePlainFrame(fullPayload, shardSize*eccCfg.DataShards)
+	if err == nil {
+		fallback = &frameCandidate{data: data, header: header, eccOK: false}
+	} else {
+		parseErr = err
+	}
+
+	if !allowRepair {
+		if fallback != nil {
+			return *fallback, nil
+		}
+		if parseErr != nil {
+			return frameCandidate{}, parseErr
+		}
+		return frameCandidate{}, fmt.Errorf("falha ao decodificar quadro com ECC inválido")
 	}
 
 	maxRepairErasures := eccCfg.ParityShards
@@ -404,18 +461,24 @@ func (fr *FrameReconstructor) tryDecodePayload(allBytes []byte, bytesInFrame int
 		maxRepairErasures = 4
 	}
 	if repairCorruptShards(ecc, shards, maxRepairErasures) {
-		fullPayload, err = ecc.Join(shards, maxShardSize*eccCfg.DataShards)
+		fullPayload, err = ecc.Join(shards, shardSize*eccCfg.DataShards)
 		if err != nil {
 			return frameCandidate{}, fmt.Errorf("falha ao unir dados do ECC reparado: %w", err)
 		}
-		repairedHeader, repairedData, err := parsePlainFrame(fullPayload, maxShardSize*eccCfg.DataShards)
+		repairedHeader, repairedData, err := parsePlainFrame(fullPayload, shardSize*eccCfg.DataShards)
 		if err != nil {
 			return frameCandidate{}, err
 		}
 		return frameCandidate{data: repairedData, header: repairedHeader, eccOK: true}, nil
 	}
 
-	return frameCandidate{data: data, header: header, eccOK: false}, nil
+	if fallback != nil {
+		return *fallback, nil
+	}
+	if parseErr != nil {
+		return frameCandidate{}, parseErr
+	}
+	return frameCandidate{}, fmt.Errorf("falha ao decodificar quadro com ECC inválido")
 }
 
 func parsePlainFrame(plaintext []byte, maxDataBytes int) (ParsedHeader, []byte, error) {

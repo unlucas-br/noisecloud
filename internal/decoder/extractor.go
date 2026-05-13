@@ -32,25 +32,13 @@ func (fe *FrameExtractor) ExtractFrames(videoPath string, progress chan<- float6
 
 	ffmpegPath := findFFmpeg()
 
-	args := []string{
-		"-hwaccel", "auto",
-		"-i", videoPath,
-		"-fps_mode", "passthrough",
-		"-q:v", "1",
-		"-pix_fmt", "rgb24",
-	}
-
-	if fe.Preset == "fast" {
-		args = append(args, "-compression_level", "0", "-pred", "0")
-	}
-
-	args = append(args, outputPattern)
-
-	cmd := exec.Command(ffmpegPath, args...)
-	cmd.Stderr = os.Stderr
-
-	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("falha na extração ffmpeg: %w", err)
+	args := fe.extractArgs(videoPath, outputPattern, "-fps_mode", "passthrough")
+	if err := runExtractCommand(ffmpegPath, args); err != nil {
+		cleanupExtractedPNGs(fe.TempDir)
+		legacyArgs := fe.extractArgs(videoPath, outputPattern, "-vsync", "0")
+		if legacyErr := runExtractCommand(ffmpegPath, legacyArgs); legacyErr != nil {
+			return nil, fmt.Errorf("falha na extração ffmpeg: %w", legacyErr)
+		}
 	}
 
 	entries, err := os.ReadDir(fe.TempDir)
@@ -74,6 +62,40 @@ func (fe *FrameExtractor) ExtractFrames(videoPath string, progress chan<- float6
 	}
 
 	return frames, nil
+}
+
+func (fe *FrameExtractor) extractArgs(videoPath, outputPattern, syncFlag, syncValue string) []string {
+	args := []string{
+		"-hwaccel", "auto",
+		"-i", videoPath,
+		syncFlag, syncValue,
+		"-q:v", "1",
+		"-pix_fmt", "rgb24",
+	}
+
+	if fe.Preset == "fast" {
+		args = append(args, "-compression_level", "0", "-pred", "0")
+	}
+
+	return append(args, outputPattern)
+}
+
+func runExtractCommand(ffmpegPath string, args []string) error {
+	cmd := exec.Command(ffmpegPath, args...)
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+func cleanupExtractedPNGs(dir string) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		if strings.HasSuffix(entry.Name(), ".png") {
+			_ = os.Remove(filepath.Join(dir, entry.Name()))
+		}
+	}
 }
 
 func findFFmpeg() string {
