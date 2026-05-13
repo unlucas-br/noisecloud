@@ -13,7 +13,11 @@ type MacroPixel struct {
 }
 
 var grayLevels = [4]uint8{32, 96, 160, 224}
-var binaryLevels = [2]uint8{32, 224}
+
+// binaryLevels usa 0 e 255 (máximo contraste) para o preset TikTok e HQ.
+// Valores anteriores eram 32/224, deixando apenas 96 de margem até o threshold 128.
+// Com 0/255 a margem dobra para 128 — muito mais resistente ao blur do H.264 do TikTok.
+var binaryLevels = [2]uint8{0, 255}
 
 func NibbleToGray(bits byte) uint8 {
 	if bits > 3 {
