@@ -1,0 +1,37 @@
+name: Update v1.1 release asset
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/update-v1.1-release.yml
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-upload:
+    if: github.repository == 'unlucas-br/noisecloud'
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Test
+        run: go test ./...
+
+      - name: Build ncc.exe
+        run: go build -o ncc.exe ./cmd/cli
+
+      - name: Upload ncc.exe to v1.1
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload v1.1 ncc.exe --clobber
