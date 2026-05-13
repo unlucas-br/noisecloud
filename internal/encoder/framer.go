@@ -68,6 +68,37 @@ func SquareFrameConfig() FrameConfig {
 	}
 }
 
+// TikTokFrameConfig retorna um preset otimizado para upload no TikTok.
+// Resolução vertical 9:16 (1080x1920), 30fps.
+//
+// MacroSize=45 porque o TikTok redimensiona 1080→576 (fator 8/15).
+// 45 × (8/15) = 24 px — número INTEIRO EXATO.
+// Cada macropixel tem 24×24 = 576 pixels para média — muito resistente ao H.264.
+//
+// CalibrationHeight=90 (2×MacroSize) para dar margem extra à barra de calibração:
+// após resize: 90 × (1024/1920) = 48px de barra — suficiente para calibrar
+// mesmo com o deblocking H.264 do TikTok.
+//
+// Grade encoder : 24 colunas × 40 linhas = 960 macropixels
+// Grade decoder : 576/24=24 cols × (1024-48)/24=40 rows = 960 — IDÊNTICO ✓
+func TikTokFrameConfig() FrameConfig {
+	return FrameConfig{
+		Width:             1080,
+		Height:            1920,
+		MacroSize:         45,
+		FPS:               30,
+		CalibrationHeight: 90,
+		GrayLevels:        2,
+	}
+}
+
+// TikTokECCConfig usa menos shards que o padrão (10+6 vs 16+8) para maximizar
+// a capacidade útil por frame no grid menor do TikTok (960 macros → 120 bytes).
+// maxShardSize = 120/16 = 7 bytes; dataCapacity = 7×10 = 70 bytes; payload = 54 bytes/frame.
+func TikTokECCConfig() ECCConfig {
+	return ECCConfig{DataShards: 10, ParityShards: 6}
+}
+
 func DefaultFrameConfig() FrameConfig {
 	return FrameConfig{
 		Width:             1280,
