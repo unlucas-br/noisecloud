@@ -35,7 +35,7 @@ func (fe *FrameExtractor) ExtractFrames(videoPath string, progress chan<- float6
 	args := []string{
 		"-hwaccel", "auto",
 		"-i", videoPath,
-		"-vsync", "0",
+		"-fps_mode", "passthrough",
 		"-q:v", "1",
 		"-pix_fmt", "rgb24",
 	}
@@ -97,4 +97,3 @@ func findFFmpeg() string {
 
 	return "ffmpeg"
 }
-
