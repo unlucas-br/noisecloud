@@ -181,14 +181,26 @@ func runDecode(inputPath, outputPath, preset string) error {
 
 	fmt.Printf("Extraídos %d frames. Reconstruindo arquivo...\n", len(frames))
 
+	outputDir := filepath.Dir(outputPath)
+	if outputDir == "" {
+		outputDir = "."
+	}
+	rawFile, err := os.CreateTemp(outputDir, "."+filepath.Base(outputPath)+".raw-*")
+	if err != nil {
+		return fmt.Errorf("criar arquivo temporário de reconstrução: %w", err)
+	}
+	rawOutputPath := rawFile.Name()
+	rawFile.Close()
+	defer os.Remove(rawOutputPath)
+
 	recon := decoder.NewFrameReconstructor(preset)
-	err = recon.ReconstructFile(frames, outputPath, nil)
+	err = recon.ReconstructFile(frames, rawOutputPath, nil)
 	if err != nil {
 		return fmt.Errorf("falha ao reconstruir: %w", err)
 	}
 
 	fmt.Println("Descomprimindo payload bruto...")
-	data, err := os.ReadFile(outputPath)
+	data, err := os.ReadFile(rawOutputPath)
 	if err != nil {
 		return fmt.Errorf("falha ao ler saída para descompressão: %w", err)
 	}
@@ -252,16 +264,18 @@ func runInteractiveMenu() {
 		fmt.Println()
 
 		menuMargin := "  "
-		fmt.Printf("%s\033[1;36m[1]\033[0m ENCODE (Esconder Arquivo)\n", menuMargin)
-		fmt.Printf("%s\033[1;36m[2]\033[0m DECODE (Recuperar Arquivo)\n", menuMargin)
-		fmt.Printf("%s\033[1;36m[3]\033[0m \033[31mSAIR\033[0m\n", menuMargin)
+		fmt.Printf("%s\033[1;36m[1]\033[0m ENCODE              (Esconder Arquivo — Padrão)\n", menuMargin)
+		fmt.Printf("%s\033[1;36m[2]\033[0m ENCODE TIKTOK       (Vertical 9:16 • 1080×1920 • 30fps)\n", menuMargin)
+		fmt.Printf("%s\033[1;36m[3]\033[0m DECODE              (Recuperar Arquivo)\n", menuMargin)
+		fmt.Printf("%s\033[1;36m[4]\033[0m DECODE TIKTOK       (Recuperar Arquivo TikTok)\n", menuMargin)
+		fmt.Printf("%s\033[1;36m[5]\033[0m \033[31mSAIR\033[0m\n", menuMargin)
 		fmt.Println()
 		fmt.Printf("%s\033[1;32m>\033[0m Selecione uma opção: ", menuMargin)
 
 		option, _ := reader.ReadString('\n')
 		option = strings.TrimSpace(option)
 
-		if option == "3" {
+		if option == "5" {
 			fmt.Print("\033[H\033[2J")
 			return
 		}
@@ -289,6 +303,49 @@ func runInteractiveMenu() {
 			waitEnter(reader)
 
 		case "2":
+			// ── ENCODE TIKTOK ─────────────────────────────────────────────────
+			fmt.Println()
+			fmt.Printf("  \033[1;36m[ TikTok Mode ]\033[0m Resolução: 1080×1920 | FPS: 30 | Máx: 10 min\n")
+			fmt.Printf("  Capacidade estimada: até \033[1;33m~1.9 MB\033[0m por vídeo de 10 minutos\n")
+			fmt.Println()
+
+			input := promptRequired(reader, "Arquivo de Entrada: ")
+			if !fileExists(input) {
+				fmt.Printf("\n❌ Erro: O arquivo '%s' não foi encontrado.\n", input)
+				waitEnter(reader)
+				continue
+			}
+
+			// Aviso de capacidade para o arquivo informado
+			if info, err := os.Stat(input); err == nil {
+				sizeMB := float64(info.Size()) / 1024 / 1024
+				// ~107 bytes payload/frame × 18000 frames (10min×30fps) ≈ 1.9 MB
+				const tiktokMaxMB = 1.9
+				if sizeMB > tiktokMaxMB {
+					fmt.Printf("\n  \033[1;33m⚠  Aviso:\033[0m Arquivo (%.1f MB) excede a capacidade de um vídeo de 10 min (≈%.0f MB).\n", sizeMB, tiktokMaxMB)
+					fmt.Printf("  O vídeo gerado será maior que 10 min e poderá ser cortado pelo TikTok.\n\n")
+				} else {
+					minutesNeeded := (sizeMB / tiktokMaxMB) * 10
+					fmt.Printf("  \033[1;32m✔\033[0m  Arquivo cabe em ≈ %.1f min de vídeo TikTok.\n\n", minutesNeeded)
+				}
+			}
+
+			output := prompt(reader, "Arquivo de Saída (ENTER para padrão): ")
+			if output == "" {
+				output = strings.TrimSuffix(input, filepath.Ext(input)) + "_tiktok.mp4"
+			}
+
+			err := runEncode(input, output, 0, "tiktok", "auto", 0)
+			if err != nil {
+				fmt.Printf("❌ Erro: %v\n", err)
+			} else {
+				fmt.Println("\n✅ Encode TikTok finalizado com sucesso!")
+				fmt.Printf("   Arquivo: %s\n", output)
+				fmt.Println("   Dica: Poste como vídeo sem música para preservar os dados.")
+			}
+			waitEnter(reader)
+
+		case "3":
 			input := promptRequired(reader, "Arquivo NCC (.mp4): ")
 			if !fileExists(input) {
 				fmt.Printf("\n❌ Erro: O arquivo '%s' não foi encontrado.\n", input)
@@ -306,6 +363,32 @@ func runInteractiveMenu() {
 				fmt.Printf("❌ Erro: %v\n", err)
 			} else {
 				fmt.Println("\n✅ Decode finalizado com sucesso!")
+			}
+			waitEnter(reader)
+
+		case "4":
+			// ── DECODE TIKTOK ─────────────────────────────────────────────────
+			fmt.Println()
+			fmt.Printf("  [ TikTok Decode ] Usando grade 1080×1920 • MacroSize=45 (24px após resize)\n")
+			fmt.Println()
+
+			input := promptRequired(reader, "Arquivo TikTok NCC (.mp4): ")
+			if !fileExists(input) {
+				fmt.Printf("\n❌ Erro: O arquivo '%s' não foi encontrado.\n", input)
+				waitEnter(reader)
+				continue
+			}
+
+			output := prompt(reader, "Arquivo de Saída: ")
+			if output == "" {
+				output = strings.TrimSuffix(input, filepath.Ext(input)) + "_recovered.bin"
+			}
+
+			err := runDecode(input, output, "tiktok")
+			if err != nil {
+				fmt.Printf("❌ Erro: %v\n", err)
+			} else {
+				fmt.Println("\n✅ Decode TikTok finalizado com sucesso!")
 			}
 			waitEnter(reader)
 
