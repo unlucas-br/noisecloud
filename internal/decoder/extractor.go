@@ -1,7 +1,9 @@
 package decoder
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -66,6 +68,9 @@ func (fe *FrameExtractor) ExtractFrames(videoPath string, progress chan<- float6
 
 func (fe *FrameExtractor) extractArgs(videoPath, outputPattern, syncFlag, syncValue string) []string {
 	args := []string{
+		"-hide_banner",
+		"-loglevel", "error",
+		"-nostats",
 		"-hwaccel", "auto",
 		"-i", videoPath,
 		syncFlag, syncValue,
@@ -82,8 +87,16 @@ func (fe *FrameExtractor) extractArgs(videoPath, outputPattern, syncFlag, syncVa
 
 func runExtractCommand(ffmpegPath string, args []string) error {
 	cmd := exec.Command(ffmpegPath, args...)
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
+	var stderr bytes.Buffer
+	cmd.Stdout = io.Discard
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		if msg := strings.TrimSpace(stderr.String()); msg != "" {
+			return fmt.Errorf("%w: %s", err, msg)
+		}
+		return err
+	}
+	return nil
 }
 
 func cleanupExtractedPNGs(dir string) {

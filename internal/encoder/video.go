@@ -22,9 +22,9 @@ type VideoEncoder struct {
 	ECCCfg   ECCConfig
 	TempDir  string
 	Threads  int
-	GPU      string 
-	Preset   string 
-	FrameKey []byte 
+	GPU      string
+	Preset   string
+	FrameKey []byte
 }
 
 // NewVideoEncoder inicializa o encoder com as configurações de hardware e frames
@@ -39,7 +39,6 @@ func NewVideoEncoder(threads int, preset string, gpu string, frameKey []byte) (*
 		if threads < 1 {
 			threads = 1
 		}
-		fmt.Printf("Threads: %d (reservando 2 cores)\n", threads)
 	}
 
 	frameCfg := DefaultFrameConfig()
@@ -51,6 +50,8 @@ func NewVideoEncoder(threads int, preset string, gpu string, frameKey []byte) (*
 		frameCfg = SquareFrameConfig()
 	} else if preset == "tiktok" {
 		frameCfg = TikTokFrameConfig()
+	} else if preset == "weave" {
+		frameCfg = CompactWeaveFrameConfig()
 	} else if preset == "fast" {
 		frameCfg = DefaultFrameConfig()
 	}
@@ -93,13 +94,17 @@ func (ve *VideoEncoder) EncodePayloads(payloads []Payload, outputPath string, pr
 		}
 	}
 
+	if ve.Preset == "weave" || ve.Preset == "tiktok" {
+		return ve.EncodePayloadsWeave(payloads, outputPath, progressCh, encoderType)
+	}
+
 	capacityFrame0 := ve.FrameCfg.CapacityPerFrame(ve.ECCCfg)
 	capacityOthers := ve.FrameCfg.CapacityPerFrame(ve.ECCCfg)
 
 	var totalFrames int
 	var payloadFrames []int
 
-	for i, p := range payloads {
+	for _, p := range payloads {
 		frames := 1
 		remaining := len(p.Data)
 		if remaining > capacityFrame0 {
@@ -116,14 +121,9 @@ func (ve *VideoEncoder) EncodePayloads(payloads []Payload, outputPath string, pr
 		}
 		totalFrames += frames
 		payloadFrames = append(payloadFrames, frames)
-
-		fmt.Printf("\nDEBUG: Payload %d: Dados=%d bytes, capacidade0=%d, capacidadeOutros=%d, frames=%d\n", i, len(p.Data), capacityFrame0, capacityOthers, frames)
-
-		fmt.Printf("Payload %d: %.2f MB | %d quadros | Threads: %d | Encoder: %s\n",
-			i, float64(len(p.Data))/1024/1024, frames, ve.Threads, encoderType)
 	}
 
-	ffmpegCmd, ffmpegStdin, err := ve.StartFFmpegPipe(outputPath, totalFrames)
+	ffmpegCmd, ffmpegStdin, ffmpegStderr, err := ve.StartFFmpegPipe(outputPath, totalFrames)
 	if err != nil {
 		return fmt.Errorf("falha ao iniciar ffmpeg: %w", err)
 	}
@@ -274,11 +274,11 @@ func (ve *VideoEncoder) EncodePayloads(payloads []Payload, outputPath string, pr
 	}()
 
 	pending := make(map[int][]MacroPixel)
-	nextFrameIndex := 0 
+	nextFrameIndex := 0
 
 	calibrationImg := image.NewRGBA(image.Rect(0, 0, ve.FrameCfg.Width, ve.FrameCfg.Height))
 	ve.renderCalibrationBar(calibrationImg)
-	calibrationBarPix := calibrationImg.Pix[:ve.FrameCfg.CalibrationHeight*calibrationImg.Stride] 
+	calibrationBarPix := calibrationImg.Pix[:ve.FrameCfg.CalibrationHeight*calibrationImg.Stride]
 
 	for res := range results {
 		if res.Err != nil {
@@ -314,7 +314,7 @@ func (ve *VideoEncoder) EncodePayloads(payloads []Payload, outputPath string, pr
 	ffmpegStdin.Close()
 
 	if err := ffmpegCmd.Wait(); err != nil {
-		return fmt.Errorf("falha na finalização do ffmpeg: %w", err)
+		return wrapFFmpegError("falha na finalizacao do ffmpeg", err, ffmpegStderr)
 	}
 
 	return nil
@@ -335,10 +335,10 @@ func (ve *VideoEncoder) renderCalibrationBar(img *image.RGBA) {
 			}
 
 			offset := img.PixOffset(x, y)
-			img.Pix[offset] = val   
-			img.Pix[offset+1] = val 
-			img.Pix[offset+2] = val 
-			img.Pix[offset+3] = 255 
+			img.Pix[offset] = val
+			img.Pix[offset+1] = val
+			img.Pix[offset+2] = val
+			img.Pix[offset+3] = 255
 		}
 	}
 }
@@ -353,10 +353,10 @@ func (ve *VideoEncoder) drawFrameToBuffer(img *image.RGBA, pixels []MacroPixel) 
 		gray := mp.ByteToGray()
 
 		for k := 0; k < mp.Size; k++ {
-			rowBuffer[k*4] = gray   
-			rowBuffer[k*4+1] = gray 
-			rowBuffer[k*4+2] = gray 
-			rowBuffer[k*4+3] = 255  
+			rowBuffer[k*4] = gray
+			rowBuffer[k*4+1] = gray
+			rowBuffer[k*4+2] = gray
+			rowBuffer[k*4+3] = 255
 		}
 
 		for y := 0; y < mp.Size; y++ {
@@ -368,13 +368,16 @@ func (ve *VideoEncoder) drawFrameToBuffer(img *image.RGBA, pixels []MacroPixel) 
 }
 
 // StartFFmpegPipe configura o pipeline do FFmpeg para compressão de vídeo (GPU ou CPU)
-func (ve *VideoEncoder) StartFFmpegPipe(outputPath string, totalFrames int) (*exec.Cmd, io.WriteCloser, error) {
+func (ve *VideoEncoder) StartFFmpegPipe(outputPath string, totalFrames int) (*exec.Cmd, io.WriteCloser, *bytes.Buffer, error) {
 	ffmpegPath := findFFmpeg()
+	_ = totalFrames
 
-	videoCodec := "libx264" 
+	videoCodec := "libx264"
 	gpuFlags := []string{}
 
-	if ve.GPU == "nvidia" || ve.GPU == "nvenc" {
+	if ve.Preset == "weave" {
+		videoCodec = "libx264"
+	} else if ve.GPU == "nvidia" || ve.GPU == "nvenc" {
 		videoCodec = "h264_nvenc"
 		if ve.Preset == "fast" {
 			gpuFlags = []string{"-preset", "p1"}
@@ -399,11 +402,10 @@ func (ve *VideoEncoder) StartFFmpegPipe(outputPath string, totalFrames int) (*ex
 		gpus := []string{"nvidia", "amd", "intel"}
 		for _, g := range gpus {
 			if err := VerifyGPU(g); err == nil {
-				fmt.Printf("GPU Detectada: %s\n", g)
 				if g == "nvidia" {
 					videoCodec = "h264_nvenc"
 					if ve.Preset == "fast" {
-						gpuFlags = []string{"-preset", "p1"} 
+						gpuFlags = []string{"-preset", "p1"}
 					} else {
 						gpuFlags = []string{"-preset", "p7", "-tune", "hq"}
 					}
@@ -425,12 +427,12 @@ func (ve *VideoEncoder) StartFFmpegPipe(outputPath string, totalFrames int) (*ex
 				break
 			}
 		}
-		if videoCodec == "libx264" {
-			fmt.Println("Nenhum encoder de GPU encontrado. Usando CPU.")
-		}
 	}
 
 	args := []string{
+		"-hide_banner",
+		"-loglevel", "error",
+		"-nostats",
 		"-y",
 		"-f", "rawvideo",
 		"-pixel_format", "rgba",
@@ -445,6 +447,8 @@ func (ve *VideoEncoder) StartFFmpegPipe(outputPath string, totalFrames int) (*ex
 			// CRF 15 = alta qualidade; slow = melhor compressão sem perdas visuais.
 			// Fundamental para que o recompressor do TikTok não corrumpa os pixels de dados.
 			args = append(args, "-preset", "slow", "-crf", "15")
+		} else if ve.Preset == "weave" {
+			args = append(args, "-preset", "slow", "-crf", "32")
 		} else if ve.Preset == "fast" {
 			args = append(args, "-preset", "ultrafast", "-crf", "18")
 		} else {
@@ -472,15 +476,27 @@ func (ve *VideoEncoder) StartFFmpegPipe(outputPath string, totalFrames int) (*ex
 	cmd := exec.Command(ffmpegPath, args...)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
-		return nil, nil, fmt.Errorf("pipe de entrada padrão falhou: %w", err)
+		return nil, nil, nil, fmt.Errorf("pipe de entrada padrão falhou: %w", err)
 	}
+	var stderr bytes.Buffer
+	cmd.Stdout = io.Discard
+	cmd.Stderr = &stderr
 
 	if err := cmd.Start(); err != nil {
 		stdin.Close()
-		return nil, nil, fmt.Errorf("falha ao iniciar o ffmpeg: %w", err)
+		return nil, nil, nil, wrapFFmpegError("falha ao iniciar o ffmpeg", err, &stderr)
 	}
 
-	return cmd, stdin, nil
+	return cmd, stdin, &stderr, nil
+}
+
+func wrapFFmpegError(prefix string, err error, stderr *bytes.Buffer) error {
+	if stderr != nil {
+		if msg := bytes.TrimSpace(stderr.Bytes()); len(msg) > 0 {
+			return fmt.Errorf("%s: %w\n%s", prefix, err, string(msg))
+		}
+	}
+	return fmt.Errorf("%s: %w", prefix, err)
 }
 
 func findFFmpeg() string {
@@ -565,7 +581,7 @@ func BenchmarkSpeed(gpuType string, width, height, fps int) (float64, error) {
 		"-hide_banner",
 		"-f", "lavfi",
 		"-i", fmt.Sprintf("testsrc=size=%dx%d:rate=%d", width, height, fps),
-		"-t", "5", 
+		"-t", "5",
 		"-c:v", codec,
 	)
 	cmd.Args = append(cmd.Args, args...)
@@ -585,4 +601,3 @@ func BenchmarkSpeed(gpuType string, width, height, fps int) (float64, error) {
 
 	return calculatedFPS, nil
 }
-

@@ -36,6 +36,8 @@ func NewFrameReconstructor(preset string) *FrameReconstructor {
 		cfg = encoder.SquareFrameConfig()
 	} else if preset == "tiktok" {
 		cfg = encoder.TikTokFrameConfig()
+	} else if preset == "weave" {
+		cfg = encoder.CompactWeaveFrameConfig()
 	}
 
 	eccCfg := encoder.NewECCConfig()
@@ -67,6 +69,10 @@ type decodeResult struct {
 
 // ReconstructFile une os frames decodificados e aplica a correção de erro Reed-Solomon
 func (fr *FrameReconstructor) ReconstructFile(framePaths []string, outputPath string, progress chan<- float64) error {
+	if fr.Preset == "weave" || fr.Preset == "tiktok" {
+		return fr.ReconstructWeaveFile(framePaths, outputPath, progress)
+	}
+
 	var allData []byte
 	var eccWarnings int32
 
@@ -74,8 +80,6 @@ func (fr *FrameReconstructor) ReconstructFile(framePaths []string, outputPath st
 	if threads < 1 {
 		threads = 1
 	}
-	fmt.Printf("Usando %d threads para reconstrução\n", threads)
-
 	sort.Slice(framePaths, func(i, j int) bool {
 		return framePaths[i] < framePaths[j]
 	})
@@ -96,8 +100,6 @@ func (fr *FrameReconstructor) ReconstructFile(framePaths []string, outputPath st
 			}
 		}
 		if len(unique) < len(framePaths) {
-			fmt.Printf("Deduplicação: %d → %d frames únicos\n",
-				len(framePaths), len(unique))
 			framePaths = unique
 		}
 	}
@@ -147,9 +149,6 @@ func (fr *FrameReconstructor) ReconstructFile(framePaths []string, outputPath st
 	for res := range resultChan {
 		if res.err != nil {
 			errCount++
-			if errCount <= 3 {
-				fmt.Fprintf(os.Stderr, "Frame %d error: %v\n", res.index, res.err)
-			}
 			continue
 		}
 		if !res.crcOK {
@@ -158,10 +157,6 @@ func (fr *FrameReconstructor) ReconstructFile(framePaths []string, outputPath st
 
 		if res.frameHeader.TotalFrames == 0 || res.frameHeader.FrameIndex >= res.frameHeader.TotalFrames {
 			errCount++
-			if errCount <= 3 {
-				fmt.Fprintf(os.Stderr, "Frame %d error: cabeçalho inconsistente (index=%d total=%d)\n",
-					res.index, res.frameHeader.FrameIndex, res.frameHeader.TotalFrames)
-			}
 			continue
 		}
 
@@ -184,14 +179,6 @@ func (fr *FrameReconstructor) ReconstructFile(framePaths []string, outputPath st
 	if len(frameByIndex) == 0 {
 		return fmt.Errorf("nenhum quadro válido decodificado (total de erros: %d)", errCount)
 	}
-
-	if errCount > 0 {
-		fmt.Printf("%d frames ignorados\n", errCount)
-	}
-	fmt.Printf("Frames decodificados: %d (de %d extraídos)\n",
-		len(frameByIndex), len(framePaths))
-
-	fmt.Println("Montando arquivo final...")
 
 	var expectedFrames uint32
 	var expectedVotes int
@@ -227,9 +214,6 @@ func (fr *FrameReconstructor) ReconstructFile(framePaths []string, outputPath st
 		res, ok := frameByIndex[i]
 		if !ok {
 			missingFrames++
-			if missingFrames <= 5 {
-				fmt.Fprintf(os.Stderr, "Missing frame %d\n", i)
-			}
 			continue
 		}
 		if !res.crcOK {
@@ -238,17 +222,10 @@ func (fr *FrameReconstructor) ReconstructFile(framePaths []string, outputPath st
 		allData = append(allData, res.data...)
 	}
 
-	if missingFrames > 0 {
-		fmt.Fprintf(os.Stderr, "\n❌ AVISO: %d frames faltando!\n", missingFrames)
-	}
-
-	if unverifiedFrames > 0 {
-		fmt.Fprintf(os.Stderr, "\nAviso ECC: %d frame(s) usados sem verificação íntegra\n", unverifiedFrames)
-	} else if eccWarnings > 0 {
-		fmt.Fprintf(os.Stderr, "\nAviso ECC: %d candidato(s) recuperado(s) por tentativa alternativa\n", eccWarnings)
-	}
-
-	fmt.Println("✅ Payload bruto reconstruído")
+	_ = errCount
+	_ = missingFrames
+	_ = unverifiedFrames
+	_ = eccWarnings
 	return os.WriteFile(outputPath, allData, 0644)
 }
 
@@ -599,6 +576,8 @@ func (fr *FrameReconstructor) candidateFrameConfigs() []encoder.FrameConfig {
 	candidates := []encoder.FrameConfig{fr.FrameCfg}
 	if fr.Preset == "tiktok" {
 		candidates = append(candidates, encoder.HQFrameConfig(), encoder.DefaultFrameConfig(), encoder.SquareFrameConfig())
+	} else if fr.Preset == "weave" {
+		candidates = append(candidates, encoder.HighDensityFrameConfig(), encoder.DefaultFrameConfig(), encoder.HQFrameConfig())
 	} else if fr.Preset == "hq" {
 		candidates = append(candidates, encoder.TikTokFrameConfig())
 	}

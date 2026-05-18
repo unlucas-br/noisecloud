@@ -1,96 +1,163 @@
 const documentModel = {
-    title: "NoiseCloud Lite",
-    introduction: "Este documento apresenta uma análise profunda sobre as etapas de compressão, codificação (encode) e decodificação (decode) de dados operadas pelo sistema <strong>NoiseCloud</strong>. A arquitetura foi avaliada identificando-se as principais estruturas no código Go que garantem a conversão segura de arquivos binários em vídeo esteganográfico focado em armazenamento em plataformas de nuvem.",
+    title: "NoiseCloud 2.0 - Relatório Técnico",
+    introduction:
+        "Este documento resume as diferenças técnicas entre o NoiseCloud Lite original e a linha atual NoiseCloud 2.0. O foco desta versão passa a ser o motor público <strong>Weave 1.0</strong> (<code>WEV1</code>), com pipeline visual mais compacto no modo padrão, reconstrução por blocos com rescue frames e uma experiência de terminal mais limpa para encode e decode.",
 
     benchmark: {
-        title: "1. Resultados Práticos de Benchmark (Encode & Decode)",
-        description: "Para comprovar a eficiência das implementações avaliadas teóricamente a seguir, foi injetado um fluxo misto de dados preenchido com bytes estáticos de alta replicação misturados com entropia (ruído via `urandom` local) totalizando em 2.00 MB. Os testes foram mensurados em pipeline isolado em hardware utilizando aceleração de vídeo híbrida e paralelismo multi-threading (10 threads base):",
+        title: "1. Benchmark Comparativo: Lite original vs Weave 1.0",
+        description:
+            "A tabela abaixo preserva as métricas históricas do relatório antigo e adiciona a medição do fluxo público atual com Weave. A coluna antiga foi mantida como referência histórica do NoiseCloud Lite; a coluna Weave 1.0 foi medida localmente no executável público atual com um payload sintético misto de 2.00 MB.",
         metrics: [
-            { label: "Tamanho do Arquivo Original", value: "2.00 MB", obs: "Carga mista usada como Input no software." },
-            { label: "Tamanho Pós-Compressão GZip", value: "1.00 MB (1.051.187 bytes)", obs: "Aproximadamente 50% de redução (depende fortemente do nível de entropia e repetição dos dados brutos)." },
-            { label: "Quadros (Frames) Ocupados", value: "3865 frames", obs: "Total de quadros gerados pelo modelo HD preset para empacotar o payload comprimido de 1 MB." },
-            { label: "Tempo Total de Encode", value: "26.87 segundos", obs: "Velocidade alcançada através de injeção paralela (Goroutines) + Hardware NVENC GPU, resultando em ~143 fps." },
-            { label: "Tamanho Final do Vídeo MP4", value: "14.36 MB", obs: "Expansão física natural do espaço de amostragem por usar pixels aglutinados (MacroPixeis 16x16) para resistir aos processos Lossy das clouds." },
-            { label: "Tempo Total de Decode", value: "46.32 segundos", obs: "Decodificação sofre com o bypass necessário ao parser do FFmpeg, varredura matricial e calibração para extrair diferencial por Macroblock em CPU limitando a performance ao processo analítico pixel-a-pixel." },
-            { label: "Integridade da Reconstrução", value: "100% Validada", obs: "Após a remontagem final e descompressão Gzip, os 2MB devolvidos ao disco eram matemática e criptograficamente idênticos ao arquivo inserido via input. Nenhuma margem de tolerância falhou." }
+            {
+                label: "Tamanho do arquivo original",
+                legacy: "2.00 MB",
+                weave: "2.00 MB (2,097,152 bytes)",
+                obs: "Base historica mantida no relatorio antigo e amostra equivalente usada no benchmark Weave atual."
+            },
+            {
+                label: "Tamanho pós-compressão Gzip",
+                legacy: "1.00 MB (1,051,187 bytes)",
+                weave: "1.00 MB (1,052,730 bytes)",
+                obs: "Os dois cenários mantêm redução próxima de 50%, confirmando que o gargalo principal continua sendo o transporte visual."
+            },
+            {
+                label: "Quadros ocupados",
+                legacy: "3865 frames",
+                weave: "2905 frames",
+                obs: "O preset Weave atual reduziu a ocupação em cerca de 24.8% e gerou 96.83 s de vídeo a 30 fps."
+            },
+            {
+                label: "Tempo total de encode",
+                legacy: "26.87 segundos",
+                weave: "7.40 segundos",
+                obs: "No teste local do Weave público, o encode caiu cerca de 72.5% em relação ao benchmark histórico do Lite."
+            },
+            {
+                label: "Tamanho final do vídeo MP4",
+                legacy: "14.36 MB",
+                weave: "3.15 MB (3,297,777 bytes)",
+                obs: "O mp4 do Weave atual ficou cerca de 78.1% menor do que o resultado histórico do preset antigo."
+            },
+            {
+                label: "Tempo total de decode",
+                legacy: "46.32 segundos",
+                weave: "7.51 segundos",
+                obs: "No snapshot público atual, o decode local caiu cerca de 83.8% em comparação com a medição histórica."
+            },
+            {
+                label: "Integridade da reconstrução",
+                legacy: "100% validada",
+                weave: "100% validada",
+                obs: "O benchmark Weave atual fechou com SHA-256 idêntico entre o arquivo original e o recuperado."
+            }
         ]
     },
 
     sections: [
         {
-            title: "2. O Modelo de Compressão de Dados",
-            intro: "O processo de inserção de dados restringe-se pela capacidade visual da rede de <em>Macro Pixels</em>. Portanto, antes de realizar a conversão visual, o sistema foca em redução volumétrica pura.",
-            reference: { file: "cmd/cli/main.go", func: "compressData(data []byte) -> Invocada em runEncode()" },
-            content: "O sistema adota <strong>Gzip</strong> em memória utilizando a biblioteca padrão (<code>compress/gzip</code>) do Go. O payload binário inicial é lido integralmente para a RAM, passado pelo compressor e repassado para o pipeline como um slice de bytes (<code>[]byte</code>) reduzido. Esta compressão <em>lossless</em> atua diretamente sobre a redundância intrínseca dos bytes de entrada.",
+            title: "2. O Que Mudou na Arquitetura",
+            intro: "A release 2.0 reorganiza a narrativa técnica do projeto: o modo padrão agora é descrito e entregue como um codec visual próprio, em vez de um encode público centrado em Reed-Solomon por frame.",
+            reference: { file: "internal/weave/doc.go", func: "documentação do motor WEV1" },
+            content:
+                "O novo núcleo <strong>Weave</strong> trata o payload como um fluxo organizado em blocos, com estrutura própria para cabeçalho, dados e rescue frames. Isso deixa mais claro onde está a resiliência do sistema e separa melhor o transporte visual da lógica de recuperação."
+        },
+        {
+            title: "3. Diferenças Centrais entre Lite e 2.0",
+            intro: "As mudanças mais importantes desta release aparecem no caminho padrão de encode/decode, no preset visual e na experiência do terminal.",
+            subsections: [
+                {
+                    title: "3.1. Motor Público Padrão: Weave em vez de Reed-Solomon por frame",
+                    reference: { file: "cmd/cli/main.go", func: "opções 1 e 3 usam preset weave" },
+                    content:
+                        "No projeto original, a documentação e o fluxo público destacavam o uso de Reed-Solomon como motor principal de recuperação visual. Na 2.0, o caminho padrão passa a usar o preset <code>weave</code> e o formato <code>WEV1</code>, que organiza o payload em blocos de frames de dados mais rescue frames.",
+                    list: [
+                        "O bloco padrão usa <strong>16 data frames + 2 rescue frames</strong>.",
+                        "A resiliência deixa de ser apresentada apenas como ECC interno de frame e passa a ser descrita como estratégia de bloco do próprio protocolo visual."
+                    ]
+                },
+                {
+                    title: "3.2. Preset Padrão Mais Compacto",
+                    reference: { file: "internal/encoder/framer.go", func: "CompactWeaveFrameConfig()" },
+                    content:
+                        "O modo padrão agora usa um preset visual compacto em <code>640x360</code>, <code>MacroSize 8</code>, <code>30 fps</code> e <code>GrayLevels 2</code>. Essa combinação reduz o custo visual do pipeline principal e deixa o comportamento diário do software mais previsível para encode local.",
+                    list: [
+                        "O objetivo não é eliminar o overhead do transporte em vídeo, e sim reduzir o custo da versão padrão em comparação com a abordagem anterior mais pesada.",
+                        "O modo TikTok continua separado porque foi ajustado para cenários mais hostis de resize e recompressão."
+                    ]
+                },
+                {
+                    title: "3.3. Decode com trailer e fallback visual",
+                    reference: { file: "internal/decoder/trailer.go", func: "ReadWeaveTrailer()" },
+                    content:
+                        "A 2.0 adiciona leitura de trailer <code>WEV1</code> antes de cair automaticamente para a reconstrução visual quadro a quadro. Isso cria um caminho mais limpo para recuperação quando o payload anexado ainda está disponível e preserva o fallback tradicional quando o decode precisa voltar para os frames.",
+                    list: [
+                        "Primeiro tenta trailer.",
+                        "Se não existir trailer utilizável, segue para extração de frames e reconstrução visual."
+                    ]
+                }
+            ]
+        },
+        {
+            title: "4. Encode na 2.0",
+            intro: "O encode continua com compressão Gzip antes da renderização visual, mas a etapa pública foi simplificada ao redor do motor Weave.",
+            subsections: [
+                {
+                    title: "4.1. Compressão antes da malha visual",
+                    reference: { file: "cmd/cli/main.go", func: "compressData(data []byte)" },
+                    content:
+                        "O payload de entrada continua passando por Gzip em memória antes de ser convertido em vídeo. Isso permanece essencial porque a capacidade visual por frame ainda é o gargalo natural do sistema.",
+                    list: []
+                },
+                {
+                    title: "4.2. Renderização visual do preset weave",
+                    reference: { file: "internal/encoder/video.go", func: "EncodePayloadsWeave()" },
+                    content:
+                        "No modo padrão, a renderização H.264 trabalha com o preset <code>weave</code> e perfil público mais compacto. O encode usa <code>faststart</code> e parâmetros de saída pensados para manter robustez visual sem voltar ao custo do preset HD anterior.",
+                    list: [
+                        "Preset padrão: <code>slow + CRF 32</code>.",
+                        "Preset TikTok: <code>slow + CRF 15</code>."
+                    ]
+                }
+            ]
+        },
+        {
+            title: "5. Decode na 2.0",
+            intro: "A lógica de decode continua dependente da extração limpa de frames e da calibração visual, mas o fluxo foi reorganizado para encaixar o protocolo Weave.",
+            subsections: [
+                {
+                    title: "5.1. Extração limpa de frames",
+                    reference: { file: "internal/decoder/extractor.go", func: "ExtractFrames()" },
+                    content:
+                        "O FFmpeg continua sendo usado para extrair snapshots estáticos em diretoria temporária, mantendo a análise visual separada do playback do vídeo.",
+                    list: []
+                },
+                {
+                    title: "5.2. Calibração, alinhamento e reconstrução",
+                    reference: { file: "internal/decoder/reconstructor.go", func: "ReconstructWeaveFile()" },
+                    content:
+                        "Depois da extração, o decoder continua usando barra de calibração, leitura por macropixels e tentativas de alinhamento para recuperar o payload. A diferença agora é que a reconstituição final se ancora no formato <code>WEV1</code> e em sua estratégia de rescue por bloco.",
+                    list: [
+                        "A calibração ainda é decisiva para lidar com perdas do H.264.",
+                        "O fallback visual segue sendo importante para vídeos baixados de plataformas."
+                    ]
+                }
+            ]
+        },
+        {
+            title: "6. Melhorias de UX e Operação",
+            intro: "Uma parte importante da 2.0 não está apenas no codec, mas no uso diário do programa.",
+            reference: { file: "cmd/cli/main.go", func: "menu e mensagens de operação" },
+            content:
+                "O terminal foi revisado para reduzir ruído e tornar o fluxo de encode/decode mais claro. O banner verboso do FFmpeg foi escondido no caminho principal, as mensagens ficaram consistentes entre as quatro operações e o menu passou a refletir melhor o estado do processo.",
             highlight: {
-                title: "Impacto nos Resultados:",
-                text: "A aplicação do Gzip diminui drasticamente o número de quadros gerados no vídeo final (proporcional à taxa de compressibilidade do arquivo de input). Como avaliado no benchmark, arquivos compressíveis reduzem 50% ou mais o volume de bytes que precisam se transformar em matriz de pixels, diminuindo o tempo de renderização em cascata pela mesma escala."
+                title: "Impacto prático:",
+                text: "A melhora de UX não acelera por si só o tempo bruto do encode ou do decode, mas reduz atrito operacional, deixa os estados do processo mais claros e aproxima a versão publicada do comportamento esperado por quem usa a ferramenta no dia a dia."
             }
-        },
-        {
-            title: "3. Engenharia de Encode: Do Binário ao Frame",
-            intro: "A etapa de Encode converte pacotes comprimidos em matrizes matemáticas de cores (Macro Pixels) prontas para o encoder em vídeo (FFmpeg).",
-            subsections: [
-                {
-                    title: "3.1. Injeção de Redundância e Correção de Erros (ECC)",
-                    reference: { file: "internal/encoder/reed_solomon.go", func: "ECCConfig{DataShards: 16, ParityShards: 8}" },
-                    content: "Antecipando a corrupção de pixels introduzida por compressores de vídeo em nuvem (ex: processamento VP9/H.264 do YouTube), o sistema fatia os dados do Gzip sob o algoritmo <strong>Reed-Solomon</strong>. Com 16 shards de dados e 8 de paridade, a engenharia garante que o bloco binário do frame será recuperável mesmo que até 33% dos pixels no vídeo se degradem para um limiar ilegível durante transmissões ou compressões agressivas de downscale no player.",
-                    list: [
-                        "O Header identificador <strong><code>NCC3</code></strong> contendo o ID do frame atual e tamanho total é prefixado logicamente e também coberto pelo ECC."
-                    ]
-                },
-                {
-                    title: "3.2. O Mapeamento de Pixels e Malha Gráfica",
-                    reference: { file: "internal/encoder/framer.go & macro_pixel.go", func: "FrameConfig e interface ByteToGray()" },
-                    content: "Ao invés de pintar pixel a pixel isoladamente (o que não suportaria nem compressões de 2% de reescala de bitrate), o sistema unifica \"quadrados espaciais\" grandes (ex: 16x16 pixels ou 24x24 pixels) denominados <strong>MacroPixels</strong>. No modo de conversão, os bytes não são lançados sob canais RGB complexos para driblar artefatos cromáticos do espaço YUV 4:2:0:",
-                    list: [
-                        "<strong>Sistema Binário (2 Gray Levels):</strong> Bits de informação são lidos (1 ou 0) e renderizados como blocos cinza-claros (nível 224) ou cinza-escuros (nível 32). Extrema robustez contra ruídos de compactação de alto nível limitadores de luminância;",
-                        "<strong>Camada YUV 4:2:0:</strong> Para preservar uma compressão de cores estável, os blocos são alimentados unicamente por Luma (escuro para claro), mantendo as camadas <strong>U</strong> e <strong>V</strong> em \"128\" (cinza neutro exato no pipeline YUV -> RGB)."
-                    ]
-                },
-                {
-                    title: "3.3. Integração com FFmpeg e GPU",
-                    reference: { file: "internal/encoder/video.go", func: "StartFFmpegPipe() e Módulo Concorrente Concurrent" },
-                    content: "O processamento final não usa gravação em disco transiente quadro-a-quadro para evitar exaustão de I/O em máquinas convencionais. A pipeline é embutida em Goroutines (baseado nos cores livres da CPU) injetando o frame visual diretamente no FFmpeg através de <code>stdin</code> via Pipe. Adicionalmente há algoritmos de detecção de infraestruturas via <code>VerifyGPU()</code> invocando automaticamente engines <code>h264_nvenc</code>, <code>h264_qsv</code> ou <code>h264_amf</code> para escalar processamento maciço em hardware local em até 140+ FPS.",
-                    list: []
-                }
-            ]
-        },
-        {
-            title: "4. Engenharia de Decode: Autocalibração e Extração",
-            intro: "A fase complexa ocorre no momento do <em>Decode</em>, pois agora o sistema lida com dados que sofreram entropia visual nas cloud infrastructures.",
-            subsections: [
-                {
-                    title: "4.1. Extração Limpa e Snapshots Estáticos",
-                    reference: { file: "internal/decoder/extractor.go" },
-                    content: "Através do CLI (<code>-hwaccel auto -vsync 0</code>), são exigidos frames YUV decodificados perfeitamente retornados como <code>.png</code> localmente num temp dir. Ao abstrair o conceito de fluidez para apenas imagens singulares, removemos gargalos de sincronia de reprodução no processo reverso.",
-                    list: []
-                },
-                {
-                    title: "4.2. Compensação de Iluminação (Limiares Dinâmicos)",
-                    reference: { file: "internal/decoder/reconstructor.go", func: "calibrateFrame(), calibrateLevels()" },
-                    content: "Arquivos em nuvem frequentemente sofrem <em>brightness shifting</em> (escurecimento sutil pelo player de vídeo para poupar banda em pretos). A barra visualmente injetada pelos Encoders chamada de <strong>CalibrationHeight</strong> (Faixa de pixels alternados branco/preto disposta no topo da resolução do output MP4) é analisada neste passo.",
-                    list: [
-                        "O algoritmo processa a média luminosa do bloco de referência White/Black e gera um novo <em>Threshold</em> (limite para categorizar binários). Desse modo, um byte que entrou como \"224 (quase branco)\", mesmo que o YouTube degradei para \"150 (cinza médio)\", ainda será legível ao compará-lo com o Threshold dinamicamente rebaixado."
-                    ]
-                },
-                {
-                    title: "4.3. Algoritmo de Luma Diferencial",
-                    reference: { file: "internal/decoder/reconstructor.go", func: "extractDifferentialMacroPixel()" },
-                    content: "Para casos complexos de filtragens severas ocorridas na rede, a varredura convencional via Threshold pode falhar e descartar muitos frames. Neste cenário, o motor roda o Fallback Diferencial. Avalia-se o lado direito versus esquerdo dentro do <em>Macro Pixel individualmente</em>, cortando problemas de ruídos espaciais na vertical (ghosting artefacts das árvores de decisão P/B e Macroblocos H.264 do transcodificador de Nuvem).",
-                    list: []
-                },
-                {
-                    title: "4.4. Reconstrução ECC e GZip",
-                    reference: null,
-                    content: "Em posse dos bits isolados pelas camadas de limiarização, o bloco é particionado novamente. Os defeitos não resolvidos visualmente são passados à rotina de Reed-Solomon que, lendo através de <code>ecc.Reconstruct()</code>, forçará a álgebra linear galoariana para suprir a matemática faltante dos shards do arquivo.<br><br>Recuperado o frame, ordenam-se as peças através do índice do protocolo NCC3 até a reconstituição do <em>raw payload</em> integral. Por fim, o sub-motor do Gzip na main descompacta e devolve a integridade exata <em>byte-to-byte</em> do arquivo original localmente.",
-                    list: []
-                }
-            ]
         }
     ],
 
-    conclusion: "A arquitetura NoiseCloud adota práticas avançadas de resistência à codificação com perdas, transformando as limitações dos codecs YUV e compressão lossy em um campo probabilístico corrigível através do ECC agressivo e da re-calibração nativa em Go-lang. A validação de 100% de integridade nos experimentos com hardwares comprova a sinergia entre o software de empacotamento MacroPixel e a lógica final Gzip."
+    conclusion:
+        "A versão 2.0 marca a transição do NoiseCloud Lite para um fluxo público baseado em Weave. O projeto fica mais coerente tecnicamente, ganha um preset padrão mais compacto, melhora a experiência de terminal e passa a documentar explicitamente o protocolo WEV1 como núcleo do caminho principal de encode e decode."
 };
 
 class DocumentController {
@@ -105,12 +172,13 @@ class DocumentController {
 
         html += `<h2>${this.model.benchmark.title}</h2>`;
         html += `<p>${this.model.benchmark.description}</p>`;
-        html += `<table><thead><tr><th>Métrica Medida</th><th>Resultado Real</th><th>Observação</th></tr></thead><tbody>`;
+        html += `<table><thead><tr><th>Métrica</th><th>Lite original</th><th>Weave 1.0</th><th>Observação</th></tr></thead><tbody>`;
 
         this.model.benchmark.metrics.forEach(m => {
             html += `<tr>
                         <td>${m.label}</td>
-                        <td>${m.value}</td>
+                        <td>${m.legacy}</td>
+                        <td>${m.weave}</td>
                         <td>${m.obs}</td>
                      </tr>`;
         });
@@ -159,7 +227,7 @@ class DocumentController {
         });
 
         html += `<hr style="margin-top: 40px; border: 0; border-top: 1px solid var(--border-color);">`;
-        html += `<p style="text-align: center; color: #6b7280; font-size: 0.9em;"><strong>Conclusão Técnica:</strong> ${this.model.conclusion}</p>`;
+        html += `<p style="text-align: center; color: #6b7280; font-size: 0.9em;"><strong>Conclusão técnica:</strong> ${this.model.conclusion}</p>`;
 
         this.container.innerHTML = html;
     }
@@ -171,20 +239,20 @@ window.onload = () => {
 };
 
 window.showSection = function (section) {
-    const articleView = document.getElementById('article-view');
-    const appView = document.getElementById('app-view');
-    const btnArticle = document.getElementById('btn-article');
-    const btnReport = document.getElementById('btn-report');
+    const articleView = document.getElementById("article-view");
+    const appView = document.getElementById("app-view");
+    const btnArticle = document.getElementById("btn-article");
+    const btnReport = document.getElementById("btn-report");
 
-    if (section === 'article') {
-        articleView.style.display = 'block';
-        appView.style.display = 'none';
-        btnArticle.classList.add('active');
-        btnReport.classList.remove('active');
+    if (section === "article") {
+        articleView.style.display = "block";
+        appView.style.display = "none";
+        btnArticle.classList.add("active");
+        btnReport.classList.remove("active");
     } else {
-        articleView.style.display = 'none';
-        appView.style.display = 'block';
-        btnArticle.classList.remove('active');
-        btnReport.classList.add('active');
+        articleView.style.display = "none";
+        appView.style.display = "block";
+        btnArticle.classList.remove("active");
+        btnReport.classList.add("active");
     }
 };

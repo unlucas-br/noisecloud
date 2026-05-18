@@ -46,6 +46,17 @@ func HighDensityFrameConfig() FrameConfig {
 	}
 }
 
+func CompactWeaveFrameConfig() FrameConfig {
+	return FrameConfig{
+		Width:             640,
+		Height:            360,
+		MacroSize:         8,
+		FPS:               30,
+		CalibrationHeight: 8,
+		GrayLevels:        2,
+	}
+}
+
 func HQFrameConfig() FrameConfig {
 	return FrameConfig{
 		Width:             1920,
