@@ -6,7 +6,7 @@ const documentModel = {
     benchmark: {
         title: "1. Benchmark Comparativo: Lite original vs Weave 1.0",
         description:
-            "A tabela abaixo preserva as métricas históricas do relatório antigo e adiciona a medição do fluxo público atual com Weave. A coluna antiga foi mantida como referência histórica do NoiseCloud Lite; a coluna Weave 1.0 foi medida localmente no executável público atual com um payload sintético misto de 2.00 MB.",
+            "A tabela abaixo preserva as métricas históricas do NoiseCloud Lite e do Weave 1.0 com Gzip, medidas antes da integração das melhorias do CHOP. A coluna Weave usa um payload sintético misto de 2.00 MB. Estes números não são um benchmark da implementação atual com Zstandard.",
         metrics: [
             {
                 label: "Tamanho do arquivo original",
@@ -99,18 +99,18 @@ const documentModel = {
         },
         {
             title: "4. Encode na 2.0",
-            intro: "O encode continua com compressão Gzip antes da renderização visual, mas a etapa pública foi simplificada ao redor do motor Weave.",
+            intro: "O código atual usa Zstandard com checksum antes da renderização visual e incorpora as validações e a reutilização de buffers do Weave adaptadas do CHOP.",
             subsections: [
                 {
                     title: "4.1. Compressão antes da malha visual",
-                    reference: { file: "cmd/cli/main.go", func: "compressData(data []byte)" },
+                    reference: { file: "cmd/cli/payload.go", func: "compressData(data []byte)" },
                     content:
-                        "O payload de entrada continua passando por Gzip em memória antes de ser convertido em vídeo. Isso permanece essencial porque a capacidade visual por frame ainda é o gargalo natural do sistema.",
+                        "Novos vídeos usam Zstandard. O decoder atualizado reconhece automaticamente Zstandard e o Gzip dos vídeos anteriores. Os frames WEV1 e os dois resgates por bloco permanecem iguais. Para ler os novos vídeos, é necessário compilar o código atual com Go 1.25 ou superior; os binários das releases anteriores não são atualizados por esta mudança.",
                     list: []
                 },
                 {
                     title: "4.2. Renderização visual do preset weave",
-                    reference: { file: "internal/encoder/video.go", func: "EncodePayloadsWeave()" },
+                    reference: { file: "internal/encoder/weave.go", func: "EncodePayloadsWeave()" },
                     content:
                         "No modo padrão, a renderização H.264 trabalha com o preset <code>weave</code> e perfil público mais compacto. O encode usa <code>faststart</code> e parâmetros de saída pensados para manter robustez visual sem voltar ao custo do preset HD anterior.",
                     list: [
@@ -133,7 +133,7 @@ const documentModel = {
                 },
                 {
                     title: "5.2. Calibração, alinhamento e reconstrução",
-                    reference: { file: "internal/decoder/reconstructor.go", func: "ReconstructWeaveFile()" },
+                    reference: { file: "internal/decoder/weave.go", func: "ReconstructWeaveFile()" },
                     content:
                         "Depois da extração, o decoder continua usando barra de calibração, leitura por macropixels e tentativas de alinhamento para recuperar o payload. A diferença agora é que a reconstituição final se ancora no formato <code>WEV1</code> e em sua estratégia de rescue por bloco.",
                     list: [

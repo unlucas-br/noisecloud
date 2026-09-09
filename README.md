@@ -62,7 +62,7 @@ Licença: **GPL-3.0**
 
 ## Sobre
 
-O NoiseCloud 2.0 transforma um arquivo comum em um vídeo `.mp4` com dados codificados visualmente. No encode, o arquivo é comprimido com Gzip, empacotado em blocos do motor `Weave 1.0` (`WEV1`), convertido em macropixels de alto contraste e renderizado em vídeo com FFmpeg. No decode, o vídeo é extraído frame a frame, calibrado, reconstruído e descomprimido, até recuperar o arquivo original.
+O NoiseCloud 2.0 transforma um arquivo comum em um vídeo `.mp4` com dados codificados visualmente. No código atual, o arquivo é comprimido com Zstandard, empacotado em blocos do motor `Weave 1.0` (`WEV1`), convertido em macropixels de alto contraste e renderizado em vídeo com FFmpeg. No decode, o vídeo é extraído frame a frame, calibrado, reconstruído e descomprimido, até recuperar o arquivo original. Vídeos anteriores com Gzip continuam sendo lidos automaticamente.
 
 O projeto não depende de servidor, conta externa ou banco de dados. O uso principal continua sendo local, por terminal, com FFmpeg cuidando da etapa de vídeo.
 
@@ -184,6 +184,12 @@ No decode, o reconstrutor detecta a dimensão real do vídeo extraído, recalcul
 
 ## Notas Técnicas
 
+- As melhorias do Weave foram adaptadas do [CHOP](https://github.com/unlucas-br/CHOP/commit/11c2a771e3203ab7773476546296ff72ac709e16): validação de metadados antes de alocar memória, rejeição de duplicatas conflitantes, recuperação de arquivos vazios e reutilização de buffers.
+- O cabeçalho `WEV1` e a paridade `16 + 2` permanecem iguais. Novos vídeos usam Zstandard com checksum; vídeos e trailers antigos com Gzip continuam compatíveis com o decoder atualizado. Decoders antigos precisam ser atualizados para ler Zstandard.
+- Limites por operação: arquivo original/descomprimido de até **1 GiB**, payload comprimido de até **256 MiB** e até **1.048.576 frames**, incluindo resgates. O limite de frames pode ser atingido antes do limite de bytes, conforme o preset. O limite de 16 MiB por grupo do CHOP não foi imposto ao vídeo inteiro.
+- A descompressão usa arquivo temporário e só substitui a saída depois de validar o fluxo completo. Metadados inconsistentes e duplicatas com conteúdos diferentes causam erro; falhas de CRC são tratadas como frames perdidos.
+- Para compilar o código atual, use **Go 1.25 ou superior**: `go build -o ncc.exe ./cmd/cli`. Estas mudanças estão em `main`; os executáveis das releases anteriores não são atualizados por estes commits.
+- Validação: `go test ./...` e `go vet ./...`. Com FFmpeg no PATH, defina `NCC_TEST_FFMPEG=1` e execute `go test ./cmd/cli -run TestVideoRoundTrip -v` para testar vídeos H.264 reais nos dois presets, inclusive com perda de dois frames.
 - O formato `WEV1` organiza o payload em blocos com frames de dados e rescue frames.
 - O preset padrão `weave` usa `640x360`, `MacroSize 8`, `30 fps` e `GrayLevels 2`.
 - O preset TikTok usa `1080x1920`, `MacroSize 45`, `30 fps` e grade vertical dedicada.
@@ -245,7 +251,7 @@ License: **GPL-3.0**
 
 ## About
 
-NoiseCloud 2.0 turns a regular file into an `.mp4` video containing visually encoded data. During encode, the file is compressed with Gzip, packed into `Weave 1.0` (`WEV1`) blocks, converted into high-contrast macropixels and rendered to video through FFmpeg. During decode, the video is extracted frame by frame, calibrated, reconstructed and decompressed, until the original file is recovered.
+NoiseCloud 2.0 turns a regular file into an `.mp4` video containing visually encoded data. In the current source, the file is compressed with Zstandard, packed into `Weave 1.0` (`WEV1`) blocks, converted into high-contrast macropixels and rendered to video through FFmpeg. During decode, the video is extracted frame by frame, calibrated, reconstructed and decompressed, until the original file is recovered. Older Gzip videos are still read automatically.
 
 The project does not depend on a server, external account or database. The main workflow remains local and terminal-based.
 
@@ -369,6 +375,12 @@ During decode, the reconstructor detects the real extracted video size, recalcul
 
 ## Technical Notes
 
+- Weave improvements were adapted from [CHOP](https://github.com/unlucas-br/CHOP/commit/11c2a771e3203ab7773476546296ff72ac709e16): metadata validation before allocation, conflicting duplicate rejection, empty-file recovery and buffer reuse.
+- The `WEV1` header and `16 + 2` parity remain unchanged. New videos use Zstandard with a checksum; older Gzip videos and trailers remain readable by the updated decoder. Older decoders must be updated to read Zstandard.
+- Per-operation limits: **1 GiB** original/decompressed file, **256 MiB** compressed payload and **1,048,576 frames**, including rescue frames. Depending on the preset, the frame limit may be reached first. CHOP's 16 MiB storage-group limit is not applied to an entire video.
+- Decompression writes to a temporary file and replaces the destination only after validating the complete stream. Inconsistent metadata and conflicting duplicates fail; CRC failures are treated as lost frames.
+- Build the current source with **Go 1.25 or later**: `go build -o ncc.exe ./cmd/cli`. These changes are on `main`; binaries in previous releases are not updated by these commits.
+- Validation: `go test ./...` and `go vet ./...`. With FFmpeg on PATH, set `NCC_TEST_FFMPEG=1` and run `go test ./cmd/cli -run TestVideoRoundTrip -v` to test real H.264 videos with both presets, including two lost frames.
 - The `WEV1` format organizes payload into blocks with data frames and rescue frames.
 - The default `weave` preset uses `640x360`, `MacroSize 8`, `30 fps` and `GrayLevels 2`.
 - The TikTok preset uses `1080x1920`, `MacroSize 45`, `30 fps` and a dedicated vertical grid.
