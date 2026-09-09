@@ -566,7 +566,7 @@ func renderMenuHeader() {
 	fmt.Println()
 
 	titleMargin := margin + "        "
-	liteTitle := "--- Lite Version by Lucas Ferraz ---"
+	liteTitle := "--- NoiseCloud 2.1 by Lucas Ferraz ---"
 	weaveTitle := "--- Weave 1.0 ---"
 	weaveMargin := titleMargin + strings.Repeat(" ", (len(liteTitle)-len(weaveTitle))/2)
 	fmt.Printf("%s\033[38;5;43m%s\033[0m\n", titleMargin, liteTitle)

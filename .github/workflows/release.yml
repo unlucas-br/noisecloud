@@ -1,0 +1,94 @@
+name: Release
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - releases/version.txt
+
+permissions:
+  contents: read
+
+concurrency:
+  group: noisecloud-release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.repository == 'unlucas-br/noisecloud'
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Read release version
+        run: |
+          $tag = (Get-Content -Raw releases/version.txt).Trim()
+          if ($tag -notmatch '^v[0-9]+\.[0-9]+(?:\.[0-9]+)?$') {
+            throw 'Invalid release version'
+          }
+          if (-not (Test-Path "releases/$tag.md")) {
+            throw 'Release notes are missing'
+          }
+          "RELEASE_TAG=$tag" >> $env:GITHUB_ENV
+          "RELEASE_VERSION=$($tag.Substring(1))" >> $env:GITHUB_ENV
+
+      - name: Test
+        run: go test ./...
+      - name: Vet
+        run: go vet ./...
+      - name: Build Windows executable
+        env:
+          GOOS: windows
+          GOARCH: amd64
+          CGO_ENABLED: '0'
+        run: |
+          New-Item -ItemType Directory -Path dist -Force | Out-Null
+          go build -trimpath -ldflags='-s -w' -o dist/ncc.exe ./cmd/cli
+          if ($LASTEXITCODE -ne 0) { throw 'Build failed' }
+
+      - name: Package and checksum
+        run: |
+          $package = "noisecloud-$env:RELEASE_VERSION-windows-amd64"
+          New-Item -ItemType Directory -Path "dist/$package" -Force | Out-Null
+          Copy-Item dist/ncc.exe, README.md, LICENSE, THIRD_PARTY_NOTICES.md "dist/$package/"
+          Copy-Item licenses "dist/$package/licenses" -Recurse
+          Copy-Item "releases/$env:RELEASE_TAG.md" "dist/$package/RELEASE.md"
+          Compress-Archive -Path "dist/$package/*" -DestinationPath "dist/$package.zip"
+          $lines = foreach ($name in @('ncc.exe', "$package.zip")) {
+            $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath "dist/$name").Hash.ToLowerInvariant()
+            "$hash  $name"
+          }
+          [IO.File]::WriteAllLines((Join-Path (Get-Location) 'dist/SHA256SUMS.txt'), $lines, [Text.UTF8Encoding]::new($false))
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          $existing = gh release view $env:RELEASE_TAG --json isDraft,targetCommitish 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            $release = $existing | ConvertFrom-Json
+            if (-not $release.isDraft) {
+              Write-Host 'Release already published; keeping existing assets.'
+              exit 0
+            }
+            if ($release.targetCommitish -ne $env:GITHUB_SHA) {
+              throw 'Existing draft targets a different commit'
+            }
+          } else {
+            gh release create $env:RELEASE_TAG --draft --target $env:GITHUB_SHA --title "NoiseCloud $env:RELEASE_VERSION" --notes-file "releases/$env:RELEASE_TAG.md"
+            if ($LASTEXITCODE -ne 0) { throw 'Could not create release draft' }
+          }
+          gh release upload $env:RELEASE_TAG dist/ncc.exe "dist/noisecloud-$env:RELEASE_VERSION-windows-amd64.zip" dist/SHA256SUMS.txt --clobber
+          if ($LASTEXITCODE -ne 0) { throw 'Asset upload failed' }
+          gh release edit $env:RELEASE_TAG --draft=false --latest
+          if ($LASTEXITCODE -ne 0) { throw 'Could not publish release' }

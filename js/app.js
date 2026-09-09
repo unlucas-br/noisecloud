@@ -1,7 +1,7 @@
 const documentModel = {
-    title: "NoiseCloud 2.0 - Relatório Técnico",
+    title: "NoiseCloud 2.1 - Relatório Técnico",
     introduction:
-        "Este documento resume as diferenças técnicas entre o NoiseCloud Lite original e a linha atual NoiseCloud 2.0. O foco desta versão passa a ser o motor público <strong>Weave 1.0</strong> (<code>WEV1</code>), com pipeline visual mais compacto no modo padrão, reconstrução por blocos com rescue frames e uma experiência de terminal mais limpa para encode e decode.",
+        "A versão <strong>NoiseCloud 2.1</strong> incorpora as melhorias do Weave adaptadas do CHOP: validação de metadados, reutilização de buffers e compressão Zstandard, mantendo a leitura dos vídeos antigos com Gzip. <a href='https://github.com/unlucas-br/noisecloud/releases/tag/v2.1'>Baixe a release 2.1 para Windows</a>. O relatório abaixo também preserva o histórico da transição do NoiseCloud Lite para o motor Weave (<code>WEV1</code>).",
 
     benchmark: {
         title: "1. Benchmark Comparativo: Lite original vs Weave 1.0",
@@ -105,7 +105,7 @@ const documentModel = {
                     title: "4.1. Compressão antes da malha visual",
                     reference: { file: "cmd/cli/payload.go", func: "compressData(data []byte)" },
                     content:
-                        "Novos vídeos usam Zstandard. O decoder atualizado reconhece automaticamente Zstandard e o Gzip dos vídeos anteriores. Os frames WEV1 e os dois resgates por bloco permanecem iguais. Para ler os novos vídeos, é necessário compilar o código atual com Go 1.25 ou superior; os binários das releases anteriores não são atualizados por esta mudança.",
+                        "Novos vídeos usam Zstandard. O decoder 2.1 reconhece automaticamente Zstandard e o Gzip dos vídeos anteriores. Os frames WEV1 e os dois resgates por bloco permanecem iguais. Para ler os novos vídeos, use o executável da release 2.1 ou compile o código com Go 1.25 ou superior.",
                     list: []
                 },
                 {
