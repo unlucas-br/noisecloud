@@ -1,7 +1,5 @@
 package weave
 
-import "math"
-
 // Encode turns a payload into systematic data frames plus rescue frames.
 // The returned order is transport-friendly: each block emits its data frames
 // followed by its rescue frames.
@@ -19,10 +17,11 @@ func EncodeTo(dst []Frame, data []byte, cfg Config) ([]Frame, error) {
 }
 
 func encodeToValidated(dst []Frame, data []byte, cfg Config, coeffs coefficientTable, blockPayloads [][]byte) ([]Frame, error) {
-	totalDataFrames := int(math.Ceil(float64(len(data)) / float64(cfg.PayloadSize)))
-	if totalDataFrames == 0 {
-		totalDataFrames = 1
+	plan, err := PlanFor(len(data), cfg)
+	if err != nil {
+		return nil, err
 	}
+	totalDataFrames := plan.DataFrames
 	blocks := (totalDataFrames + cfg.DataFramesPerBlock - 1) / cfg.DataFramesPerBlock
 	frames := dst
 	if cap(frames)-len(frames) < totalDataFrames+blocks*cfg.RescueFramesPerBlock {
@@ -55,10 +54,11 @@ func encodeToValidated(dst []Frame, data []byte, cfg Config, coeffs coefficientT
 			frames = append(frames, Frame{
 				Header: Header{
 					FrameType:      FrameTypeData,
-					BlockSize:      uint16(cfg.DataFramesPerBlock),
-					FrameIndex:     uint32(frameIndex),
-					TotalFrames:    uint32(totalDataFrames),
+					BlockSize:      uint16(cfg.DataFramesPerBlock), // #nosec G115 -- validated configuration restricts block size to 1..255.
+					FrameIndex:     uint32(frameIndex),             // #nosec G115 -- PlanFor bounds frame count to maxFrameCount.
+					TotalFrames:    uint32(totalDataFrames),        // #nosec G115 -- PlanFor bounds frame count to maxFrameCount.
 					TotalDataBytes: uint64(len(data)),
+					DataSize:       uint16(len(payload)), // #nosec G115 -- payload is bounded by validated PayloadSize <= uint16.
 				},
 				Payload: payload,
 			})
@@ -69,11 +69,12 @@ func encodeToValidated(dst []Frame, data []byte, cfg Config, coeffs coefficientT
 			frames = append(frames, Frame{
 				Header: Header{
 					FrameType:      FrameTypeRescue,
-					BlockSize:      uint16(cfg.DataFramesPerBlock),
-					FrameIndex:     uint32(blockStart),
-					TotalFrames:    uint32(totalDataFrames),
+					BlockSize:      uint16(cfg.DataFramesPerBlock), // #nosec G115 -- validated configuration restricts block size to 1..255.
+					FrameIndex:     uint32(blockStart),             // #nosec G115 -- PlanFor bounds frame count to maxFrameCount.
+					TotalFrames:    uint32(totalDataFrames),        // #nosec G115 -- PlanFor bounds frame count to maxFrameCount.
 					RescueIndex:    uint16(i),
 					TotalDataBytes: uint64(len(data)),
+					DataSize:       uint16(len(payload)), // #nosec G115 -- payload is bounded by validated PayloadSize <= uint16.
 				},
 				Payload: payload,
 			})
@@ -91,10 +92,21 @@ func BuildRescuePayloads(blockPayloads [][]byte, payloadSize int) [][]byte {
 		DataFramesPerBlock:   len(blockPayloads),
 		RescueFramesPerBlock: DefaultRescueCount,
 	}
+	if cfg.validate() != nil {
+		return nil
+	}
+	for _, payload := range blockPayloads {
+		if len(payload) > payloadSize {
+			return nil
+		}
+	}
 	return buildRescuePayloads(blockPayloads, cfg, newCoefficientTable(cfg))
 }
 
 func buildRescuePayloads(blockPayloads [][]byte, cfg Config, coeffs coefficientTable) [][]byte {
+	if cfg.RescueFramesPerBlock == 0 {
+		return nil
+	}
 	if is16x2Profile(cfg) {
 		return buildRescuePayloads16x2(blockPayloads, cfg.PayloadSize, coeffs)
 	}

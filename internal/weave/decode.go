@@ -1,6 +1,9 @@
 package weave
 
-import "fmt"
+import (
+	"bytes"
+	"fmt"
+)
 
 // DecodeStats summarizes the repair work performed by Reconstruct.
 type DecodeStats struct {
@@ -16,10 +19,16 @@ type DecodeStats struct {
 // ReconstructBinary parses marshalled frames, discards invalid frames, repairs
 // recoverable erasures, and returns the original payload.
 func ReconstructBinary(packets [][]byte, cfg Config) ([]byte, DecodeStats, error) {
+	if err := cfg.validate(); err != nil {
+		return nil, DecodeStats{}, err
+	}
+	if len(packets) > 2*maxFrameCount {
+		return nil, DecodeStats{}, fmt.Errorf("%w: too many packets", ErrUnrecoverable)
+	}
 	var frames []Frame
 	stats := DecodeStats{}
 	for _, packet := range packets {
-		frame, err := ParseFrame(packet)
+		frame, err := ParseFrameView(packet)
 		if err != nil {
 			stats.InvalidFrames++
 			continue
@@ -47,83 +56,94 @@ func ReconstructTo(dst []byte, frames []Frame, cfg Config) ([]byte, DecodeStats,
 }
 
 func reconstructToValidated(dst []byte, frames []Frame, cfg Config, coeffs coefficientTable, workspace *reconstructWorkspace) ([]byte, DecodeStats, error) {
-	totalFrameVotes, totalByteVotes, blockSizeVotes := freshVoteMaps(workspace)
 	stats := DecodeStats{}
-	validCandidates := 0
-
-	for _, frame := range frames {
-		h := frame.Header
-		if !frameMetadataLooksValid(h, len(frame.Payload), cfg) {
-			stats.InvalidFrames++
-			continue
-		}
-		totalFrameVotes[h.TotalFrames]++
-		totalByteVotes[h.TotalDataBytes]++
-		blockSizeVotes[h.BlockSize]++
-		validCandidates++
-	}
-
-	if validCandidates == 0 {
+	if len(frames) == 0 {
 		return nil, stats, ErrNoValidFrames
 	}
-
-	totalFrames := voteUint32(totalFrameVotes)
-	totalBytes := voteUint64(totalByteVotes)
-	blockSize := voteUint16(blockSizeVotes)
-	if totalFrames == 0 || blockSize == 0 {
-		return nil, stats, fmt.Errorf("%w: missing metadata", ErrUnrecoverable)
+	if len(frames) > 2*maxFrameCount {
+		return nil, stats, fmt.Errorf("%w: too many frames", ErrUnrecoverable)
 	}
-	stats.TotalDataFrames = totalFrames
-	stats.TotalDataBytes = totalBytes
-
-	blockCfg := cfg
-	blockCfg.DataFramesPerBlock = int(blockSize)
-	if err := blockCfg.validate(); err != nil {
-		return nil, stats, err
+	metadata := frames[0].Header
+	// Every missing data frame needs an independent rescue equation. A stream
+	// with fewer received frames cannot justify allocating its declared slots.
+	if uint64(metadata.TotalFrames) > uint64(len(frames)) {
+		return nil, stats, fmt.Errorf("%w: insufficient frames for declared payload", ErrUnrecoverable)
 	}
-	if blockCfg.DataFramesPerBlock != cfg.DataFramesPerBlock {
-		coeffs = newCoefficientTable(blockCfg)
-	}
-
-	blockCount := int((totalFrames + uint32(blockSize) - 1) / uint32(blockSize))
-	dataFrames := freshDataFrameSlots(workspace, totalFrames)
-	rescueFrames := freshRescueFrameSlots(workspace, blockCount, cfg.RescueFramesPerBlock)
-
+	var nextData uint32
+	ordered := true
 	for _, frame := range frames {
 		h := frame.Header
 		if !frameMetadataLooksValid(h, len(frame.Payload), cfg) {
-			continue
-		}
-		if h.TotalFrames != totalFrames || h.TotalDataBytes != totalBytes || h.BlockSize != blockSize {
 			stats.InvalidFrames++
-			continue
+			return nil, stats, fmt.Errorf("%w: invalid frame metadata", ErrUnrecoverable)
 		}
+		if h.TotalFrames != metadata.TotalFrames || h.TotalDataBytes != metadata.TotalDataBytes || h.BlockSize != metadata.BlockSize {
+			stats.InvalidFrames++
+			return nil, stats, fmt.Errorf("%w: inconsistent frame metadata", ErrUnrecoverable)
+		}
+		if h.FrameType == FrameTypeData {
+			if h.FrameIndex != nextData {
+				ordered = false
+			}
+			nextData++
+		}
+	}
+	// Metadata has been bounded and cross-checked before any size-dependent allocation.
+	totalFrames := metadata.TotalFrames
+	totalBytes := metadata.TotalDataBytes
+	blockSize := metadata.BlockSize
+	stats.TotalDataFrames = totalFrames
+	stats.TotalDataBytes = totalBytes
+	if cfg.RescueFramesPerBlock == 0 && ordered && nextData == totalFrames {
+		dst = sizedOutput(dst, totalBytes)
+		position := 0
+		for _, frame := range frames {
+			position += copy(dst[position:], frame.Payload)
+		}
+		stats.DataFramesSeen = int(totalFrames)
+		if position != len(dst) {
+			return nil, stats, fmt.Errorf("%w: reconstructed size mismatch", ErrUnrecoverable)
+		}
+		return dst, stats, nil
+	}
+	blockCount := int((totalFrames + uint32(blockSize) - 1) / uint32(blockSize))
+	dataFrames := freshDataFrameSlots(workspace, totalFrames)
+	present := freshPresentSlots(workspace, totalFrames)
+	var rescueFrames [][][]byte
+	if cfg.RescueFramesPerBlock > 0 {
+		rescueFrames = freshRescueFrameSlots(workspace, blockCount, cfg.RescueFramesPerBlock)
+	}
 
+	for _, frame := range frames {
+		h := frame.Header
 		switch h.FrameType {
 		case FrameTypeData:
-			if h.FrameIndex >= totalFrames {
-				stats.InvalidFrames++
+			if present[h.FrameIndex] {
+				if !bytes.Equal(dataFrames[h.FrameIndex], frame.Payload) {
+					return nil, stats, fmt.Errorf("%w: conflicting duplicate data frame", ErrUnrecoverable)
+				}
 				continue
 			}
 			dataFrames[h.FrameIndex] = frame.Payload
+			if frame.Payload == nil {
+				// The valid empty frame is present; nil remains the repair sentinel.
+				dataFrames[h.FrameIndex] = []byte{}
+			}
+			present[h.FrameIndex] = true
 			stats.DataFramesSeen++
 		case FrameTypeRescue:
-			if h.FrameIndex >= totalFrames || h.FrameIndex%uint32(blockSize) != 0 {
-				stats.InvalidFrames++
-				continue
-			}
 			blockID := int(h.FrameIndex / uint32(blockSize))
-			if blockID < 0 || blockID >= len(rescueFrames) {
-				stats.InvalidFrames++
-				continue
-			}
 			if rescueFrames[blockID] == nil {
 				rescueFrames[blockID] = make([][]byte, cfg.RescueFramesPerBlock)
 			}
+			if existing := rescueFrames[blockID][h.RescueIndex]; existing != nil {
+				if !bytes.Equal(existing, frame.Payload) {
+					return nil, stats, fmt.Errorf("%w: conflicting duplicate rescue frame", ErrUnrecoverable)
+				}
+				continue
+			}
 			rescueFrames[blockID][h.RescueIndex] = frame.Payload
 			stats.RescueFramesSeen++
-		default:
-			stats.InvalidFrames++
 		}
 	}
 
@@ -131,14 +151,10 @@ func reconstructToValidated(dst []byte, frames []Frame, cfg Config, coeffs coeff
 		return nil, stats, ErrNoValidFrames
 	}
 
-	stats.RecoveredFrames = repairBlocksWithWorkspace(dataFrames, rescueFrames, totalFrames, totalBytes, blockCfg, coeffs, workspace)
-
-	if uint64(cap(dst)) < totalBytes {
-		dst = make([]byte, 0, totalBytes)
-	} else {
-		dst = dst[:0]
+	if stats.DataFramesSeen != int(totalFrames) && stats.RescueFramesSeen > 0 {
+		stats.RecoveredFrames = repairBlocksWithWorkspace(dataFrames, rescueFrames, totalFrames, totalBytes, cfg, coeffs, workspace)
 	}
-
+	// Check recovery before allocating output or changing caller-provided dst.
 	for i := uint32(0); i < totalFrames; i++ {
 		payload := dataFrames[i]
 		if payload == nil {
@@ -146,25 +162,41 @@ func reconstructToValidated(dst []byte, frames []Frame, cfg Config, coeffs coeff
 			continue
 		}
 		size := dataSizeForFrame(i, totalBytes, cfg.PayloadSize)
-		if len(payload) > size {
-			payload = payload[:size]
+		if len(payload) != size {
+			return nil, stats, fmt.Errorf("%w: reconstructed frame size mismatch", ErrUnrecoverable)
 		}
-		dst = append(dst, payload...)
 	}
 	if stats.MissingFrames > 0 {
 		return nil, stats, fmt.Errorf("%w: %d frame(s) missing", ErrUnrecoverable, stats.MissingFrames)
 	}
-	if uint64(len(dst)) > totalBytes {
-		dst = dst[:totalBytes]
+	dst = sizedOutput(dst, totalBytes)
+	position := 0
+	for _, payload := range dataFrames {
+		position += copy(dst[position:], payload)
+	}
+	if position != len(dst) {
+		return nil, stats, fmt.Errorf("%w: reconstructed size mismatch", ErrUnrecoverable)
 	}
 	return dst, stats, nil
 }
 
-func freshVoteMaps(workspace *reconstructWorkspace) (map[uint32]int, map[uint64]int, map[uint16]int) {
-	if workspace != nil {
-		return workspace.voteMaps()
+func sizedOutput(dst []byte, size uint64) []byte {
+	if uint64(cap(dst)) < size {
+		return make([]byte, size)
 	}
-	return make(map[uint32]int), make(map[uint64]int), make(map[uint16]int)
+	return dst[:size]
+}
+
+func freshPresentSlots(workspace *reconstructWorkspace, totalFrames uint32) []bool {
+	if workspace == nil {
+		return make([]bool, totalFrames)
+	}
+	if cap(workspace.present) < int(totalFrames) {
+		workspace.present = make([]bool, totalFrames)
+	}
+	workspace.present = workspace.present[:totalFrames]
+	clear(workspace.present)
+	return workspace.present
 }
 
 func freshDataFrameSlots(workspace *reconstructWorkspace, totalFrames uint32) [][]byte {
@@ -182,24 +214,24 @@ func freshRescueFrameSlots(workspace *reconstructWorkspace, blockCount int, resc
 }
 
 func frameMetadataLooksValid(h Header, payloadLen int, cfg Config) bool {
-	if h.TotalFrames == 0 || h.BlockSize == 0 {
+	if h.TotalDataBytes > MaxPayloadBytes || int(h.BlockSize) != cfg.DataFramesPerBlock {
 		return false
 	}
-	if h.FrameType != FrameTypeData && h.FrameType != FrameTypeRescue {
+	plan, err := PlanFor(int(h.TotalDataBytes), cfg) // #nosec G115 -- total bytes checked against MaxPayloadBytes before conversion.
+	if err != nil || int64(h.TotalFrames) != int64(plan.DataFrames) || h.FrameIndex >= h.TotalFrames {
 		return false
 	}
-	if payloadLen > cfg.PayloadSize {
+	if int(h.DataSize) != payloadLen {
 		return false
 	}
-	if h.FrameType == FrameTypeRescue {
-		if int(h.RescueIndex) >= cfg.RescueFramesPerBlock {
-			return false
-		}
-		if payloadLen < cfg.PayloadSize {
-			return false
-		}
+	switch h.FrameType {
+	case FrameTypeData:
+		return h.RescueIndex == 0 && payloadLen == dataSizeForFrame(h.FrameIndex, h.TotalDataBytes, cfg.PayloadSize)
+	case FrameTypeRescue:
+		return int(h.RescueIndex) < cfg.RescueFramesPerBlock && h.FrameIndex%uint32(h.BlockSize) == 0 && payloadLen == cfg.PayloadSize
+	default:
+		return false
 	}
-	return true
 }
 
 func repairBlocks(data [][]byte, rescues [][][]byte, totalFrames uint32, totalBytes uint64, cfg Config, coeffs coefficientTable) int {
@@ -208,7 +240,7 @@ func repairBlocks(data [][]byte, rescues [][][]byte, totalFrames uint32, totalBy
 
 func repairBlocksWithWorkspace(data [][]byte, rescues [][][]byte, totalFrames uint32, totalBytes uint64, cfg Config, coeffs coefficientTable, workspace *reconstructWorkspace) int {
 	recovered := 0
-	blockSize := uint32(cfg.DataFramesPerBlock)
+	blockSize := uint32(cfg.DataFramesPerBlock) // #nosec G115 -- cfg.validate restricts block size to 1..255.
 	inverseCache := make(map[string][][]byte)
 	scratch := repairScratch{}
 	scratchRef := &scratch
@@ -282,6 +314,10 @@ func repairBlocksWithWorkspace(data [][]byte, rescues [][][]byte, totalFrames ui
 		key := inverseCacheKey(blockStart, missing, usedRescues)
 		inverse, ok := inverseCache[key]
 		if !ok {
+			// Bound retained repair patterns when a Codec is reused on untrusted input.
+			if len(inverseCache) >= 64 {
+				clear(inverseCache)
+			}
 			matrix := make([][]byte, len(missing))
 			for row, rescueIndex := range usedRescues {
 				matrix[row] = make([]byte, len(missing))
@@ -664,17 +700,20 @@ func invertMatrix(matrix [][]byte) ([][]byte, bool) {
 
 func inverseCacheKey(blockStart uint32, missing []uint32, rescueIndexes []uint16) string {
 	key := make([]byte, 0, 1+len(missing)+len(rescueIndexes)*2)
-	key = append(key, byte(len(missing)))
+	key = append(key, byte(len(missing))) // #nosec G115 -- missing slots belong to one validated block of at most 255 frames.
 	for _, idx := range missing {
-		key = append(key, byte(idx-blockStart))
+		key = append(key, byte(idx-blockStart)) // #nosec G115 -- relative slot belongs to one validated block of at most 255 frames.
 	}
 	for _, rescueIndex := range rescueIndexes {
-		key = append(key, byte(rescueIndex>>8), byte(rescueIndex))
+		key = append(key, byte(rescueIndex>>8), byte(rescueIndex&0xff))
 	}
 	return string(key)
 }
 
 func dataSizeForFrame(index uint32, totalBytes uint64, payloadSize int) int {
+	if payloadSize <= 0 || payloadSize > 65535 {
+		return 0
+	}
 	start := uint64(index) * uint64(payloadSize)
 	if start >= totalBytes {
 		return 0
@@ -683,41 +722,5 @@ func dataSizeForFrame(index uint32, totalBytes uint64, payloadSize int) int {
 	if remaining > uint64(payloadSize) {
 		return payloadSize
 	}
-	return int(remaining)
-}
-
-func voteUint32(votes map[uint32]int) uint32 {
-	var out uint32
-	best := -1
-	for value, count := range votes {
-		if count > best {
-			out = value
-			best = count
-		}
-	}
-	return out
-}
-
-func voteUint64(votes map[uint64]int) uint64 {
-	var out uint64
-	best := -1
-	for value, count := range votes {
-		if count > best {
-			out = value
-			best = count
-		}
-	}
-	return out
-}
-
-func voteUint16(votes map[uint16]int) uint16 {
-	var out uint16
-	best := -1
-	for value, count := range votes {
-		if count > best {
-			out = value
-			best = count
-		}
-	}
-	return out
+	return int(remaining) // #nosec G115 -- remaining is bounded by validated payloadSize <= 65535.
 }

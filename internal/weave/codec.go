@@ -50,10 +50,8 @@ func (c *Codec) ReconstructTo(dst []byte, frames []Frame) ([]byte, DecodeStats, 
 }
 
 type reconstructWorkspace struct {
-	totalFrameVotes map[uint32]int
-	totalByteVotes  map[uint64]int
-	blockSizeVotes  map[uint16]int
 	dataFrames      [][]byte
+	present         []bool
 	rescueFrames    [][][]byte
 	inverseCache    map[string][][]byte
 	inverseData     int
@@ -63,25 +61,6 @@ type reconstructWorkspace struct {
 	recovered       [][]byte
 	recoveredCursor int
 	scratch         repairScratch
-}
-
-func (w *reconstructWorkspace) voteMaps() (map[uint32]int, map[uint64]int, map[uint16]int) {
-	if w.totalFrameVotes == nil {
-		w.totalFrameVotes = make(map[uint32]int)
-	} else {
-		clear(w.totalFrameVotes)
-	}
-	if w.totalByteVotes == nil {
-		w.totalByteVotes = make(map[uint64]int)
-	} else {
-		clear(w.totalByteVotes)
-	}
-	if w.blockSizeVotes == nil {
-		w.blockSizeVotes = make(map[uint16]int)
-	} else {
-		clear(w.blockSizeVotes)
-	}
-	return w.totalFrameVotes, w.totalByteVotes, w.blockSizeVotes
 }
 
 func (w *reconstructWorkspace) dataFrameSlots(totalFrames uint32) [][]byte {
@@ -125,7 +104,7 @@ func (w *reconstructWorkspace) beginRecoveredPayloads() {
 
 func (w *reconstructWorkspace) recoveredPayload(size int) []byte {
 	if size == 0 {
-		return nil
+		return []byte{}
 	}
 	if w.recoveredCursor == len(w.recovered) {
 		w.recovered = append(w.recovered, nil)

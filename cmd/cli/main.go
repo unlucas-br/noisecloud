@@ -2,11 +2,8 @@ package main
 
 import (
 	"bufio"
-	"bytes"
-	"compress/gzip"
 	"crypto/rand"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -236,9 +233,12 @@ func runEncode(inputPath, outputPath string, threads int, preset, gpu string, ta
 		report = func(string, string, float64, bool) {}
 	}
 
-	_, err := os.Stat(inputPath)
+	info, err := os.Stat(inputPath)
 	if err != nil {
 		return fmt.Errorf("arquivo nao encontrado: %s", inputPath)
+	}
+	if info.Size() > maxDecodedPayloadBytes {
+		return fmt.Errorf("arquivo excede o limite de 1 GiB")
 	}
 
 	data, err := os.ReadFile(inputPath)
@@ -405,37 +405,6 @@ func runDecode(inputPath, outputPath, preset string, report statusReporter) erro
 		return err
 	}
 	return nil
-}
-
-func writeDecompressedPayload(data []byte, outputPath string) error {
-	gz, err := gzip.NewReader(bytes.NewReader(data))
-	if err != nil {
-		return fmt.Errorf("falha ao iniciar descompressao: %w", err)
-	}
-	defer gz.Close()
-
-	decompressed, err := io.ReadAll(gz)
-	if err != nil {
-		return fmt.Errorf("falha na leitura da descompressao: %w", err)
-	}
-
-	if err := os.WriteFile(outputPath, decompressed, 0644); err != nil {
-		return fmt.Errorf("salvar arquivo final: %w", err)
-	}
-
-	return nil
-}
-
-func compressData(data []byte) ([]byte, error) {
-	var buf bytes.Buffer
-	gz := gzip.NewWriter(&buf)
-	if _, err := gz.Write(data); err != nil {
-		return nil, err
-	}
-	if err := gz.Close(); err != nil {
-		return nil, err
-	}
-	return buf.Bytes(), nil
 }
 
 func runInteractiveMenu() {

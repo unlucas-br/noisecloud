@@ -4,7 +4,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"hash/crc32"
-	"io"
 	"os"
 )
 
@@ -14,7 +13,10 @@ const (
 )
 
 func AppendTrailer(path string, payload []byte) error {
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0644)
+	if len(payload) > maxProtectedBytes {
+		return fmt.Errorf("weave trailer exceeds core bounds")
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0600) // #nosec G304 -- explicit caller-selected file to append a trailer.
 	if err != nil {
 		return err
 	}
@@ -33,7 +35,7 @@ func AppendTrailer(path string, payload []byte) error {
 }
 
 func ReadTrailer(path string) ([]byte, bool, error) {
-	f, err := os.Open(path)
+	f, err := os.Open(path) // #nosec G304 -- explicit caller-selected source file.
 	if err != nil {
 		return nil, false, err
 	}
@@ -56,14 +58,18 @@ func ReadTrailer(path string) ([]byte, bool, error) {
 		return nil, false, nil
 	}
 
-	payloadLen := int64(binary.BigEndian.Uint64(footer[0:8]))
+	payloadValue := binary.BigEndian.Uint64(footer[0:8])
+	if payloadValue > maxProtectedBytes {
+		return nil, true, fmt.Errorf("trailer compacto excede limite")
+	}
+	payloadLen := int64(payloadValue)
 	payloadStart := info.Size() - footerSize - payloadLen
 	if payloadLen < 0 || payloadStart < 0 {
 		return nil, true, fmt.Errorf("trailer compacto invalido")
 	}
 
 	payload := make([]byte, int(payloadLen))
-	if _, err := f.ReadAt(payload, payloadStart); err != nil && err != io.EOF {
+	if _, err := f.ReadAt(payload, payloadStart); err != nil {
 		return nil, true, err
 	}
 

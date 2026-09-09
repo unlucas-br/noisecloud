@@ -9,6 +9,9 @@ import (
 
 func (ve *VideoEncoder) EncodePayloadsWeave(payloads []Payload, outputPath string, progressCh chan<- float64, encoderType string) error {
 	_ = encoderType
+	if len(payloads) != 1 {
+		return fmt.Errorf("Weave requer exatamente um payload por video")
+	}
 	frameCapacity := ve.FrameCfg.TotalBytesCapacity()
 	payloadCapacity := frameCapacity - weave.HeaderSize
 	if payloadCapacity <= 0 {
@@ -21,31 +24,23 @@ func (ve *VideoEncoder) EncodePayloadsWeave(payloads []Payload, outputPath strin
 		RescueFramesPerBlock: weave.DefaultRescueCount,
 	}
 
-	var packets [][]byte
-	for _, payload := range payloads {
-		frames, err := weave.Encode(payload.Data, cfg)
-		if err != nil {
-			return fmt.Errorf("falha ao gerar padding weave: %w", err)
-		}
-		frames = weave.InterleaveByBlock(frames)
-
-		for _, frame := range frames {
-			packet, err := frame.MarshalBinary()
-			if err != nil {
-				return fmt.Errorf("falha ao serializar frame weave: %w", err)
-			}
-			if len(packet) > frameCapacity {
-				return fmt.Errorf("frame weave excede capacidade: %d bytes > %d", len(packet), frameCapacity)
-			}
-			packets = append(packets, packet)
-		}
+	frames, err := weave.Encode(payloads[0].Data, cfg)
+	if err != nil {
+		return fmt.Errorf("falha ao gerar frames weave: %w", err)
 	}
+	frames = weave.InterleaveByBlock(frames)
 
-	ffmpegCmd, ffmpegStdin, ffmpegStderr, err := ve.StartFFmpegPipe(outputPath, len(packets))
+	ffmpegCmd, ffmpegStdin, ffmpegStderr, err := ve.StartFFmpegPipe(outputPath, len(frames))
 	if err != nil {
 		return fmt.Errorf("falha ao iniciar ffmpeg: %w", err)
 	}
-	defer ffmpegStdin.Close()
+	defer func() {
+		ffmpegStdin.Close()
+		if ffmpegCmd.ProcessState == nil {
+			ffmpegCmd.Process.Kill()
+			ffmpegCmd.Wait()
+		}
+	}()
 
 	calibrationImg := image.NewRGBA(image.Rect(0, 0, ve.FrameCfg.Width, ve.FrameCfg.Height))
 	ve.renderCalibrationBar(calibrationImg)
@@ -53,15 +48,20 @@ func (ve *VideoEncoder) EncodePayloadsWeave(payloads []Payload, outputPath strin
 
 	cols, rows := ve.FrameCfg.GridSize()
 	pixelBuf := make([]MacroPixel, cols*rows)
+	packet := make([]byte, 0, frameCapacity)
+	img := image.NewRGBA(image.Rect(0, 0, ve.FrameCfg.Width, ve.FrameCfg.Height))
+	copy(img.Pix[:ve.FrameCfg.CalibrationHeight*img.Stride], calibrationBarPix)
 
-	for i, packet := range packets {
+	for i, frame := range frames {
+		packet, err = frame.AppendBinary(packet[:0])
+		if err != nil {
+			return fmt.Errorf("falha ao serializar frame weave: %w", err)
+		}
 		pixels, err := ve.renderWeavePacket(packet, pixelBuf)
 		if err != nil {
 			return fmt.Errorf("falha ao renderizar quadro weave %d: %w", i, err)
 		}
 
-		img := image.NewRGBA(image.Rect(0, 0, ve.FrameCfg.Width, ve.FrameCfg.Height))
-		copy(img.Pix[:ve.FrameCfg.CalibrationHeight*img.Stride], calibrationBarPix)
 		ve.drawFrameToBuffer(img, pixels)
 
 		if _, err := ffmpegStdin.Write(img.Pix); err != nil {
@@ -69,7 +69,7 @@ func (ve *VideoEncoder) EncodePayloadsWeave(payloads []Payload, outputPath strin
 		}
 
 		if progressCh != nil {
-			progressCh <- float64(i+1) / float64(len(packets))
+			progressCh <- float64(i+1) / float64(len(frames))
 		}
 	}
 
@@ -90,9 +90,6 @@ func (ve *VideoEncoder) renderWeavePacket(packet []byte, pixels []MacroPixel) ([
 		return nil, fmt.Errorf("dados excedem a capacidade do quadro: %d bytes > %d max", len(packet), maxBytes)
 	}
 
-	frameBytes := make([]byte, maxBytes)
-	copy(frameBytes, packet)
-
 	if cap(pixels) < totalMacros {
 		pixels = make([]MacroPixel, totalMacros)
 	}
@@ -107,17 +104,18 @@ func (ve *VideoEncoder) renderWeavePacket(packet []byte, pixels []MacroPixel) ([
 	for y := 0; y < rows; y++ {
 		for x := 0; x < cols; x++ {
 			byteIdx := i / pixelsPerByte
-			if byteIdx >= len(frameBytes) {
-				return pixels, nil
+			var value byte
+			if byteIdx < len(packet) {
+				value = packet[byteIdx]
 			}
 
 			var bits byte
 			if ve.FrameCfg.GrayLevels == 2 {
 				shift := uint(7 - (i % 8))
-				bits = (frameBytes[byteIdx] >> shift) & 0x01
+				bits = (value >> shift) & 0x01
 			} else {
 				shift := uint(6 - (i%4)*2)
-				bits = (frameBytes[byteIdx] >> shift) & 0x03
+				bits = (value >> shift) & 0x03
 			}
 
 			pixels[i] = MacroPixel{

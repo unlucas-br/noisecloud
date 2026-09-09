@@ -57,15 +57,15 @@ func (fr *FrameReconstructor) ReconstructWeaveFile(framePaths []string, outputPa
 	var processed int
 	var errCount int
 	for res := range resultChan {
+		processed++
+		if progress != nil {
+			progress <- float64(processed) / float64(len(framePaths))
+		}
 		if res.err != nil {
 			errCount++
 			continue
 		}
 		frames = append(frames, res.frame)
-		processed++
-		if progress != nil {
-			progress <- float64(processed) / float64(len(framePaths))
-		}
 	}
 
 	if len(frames) == 0 {

@@ -35,14 +35,25 @@ type Frame struct {
 // MarshalBinary serializes the frame as [32-byte header][payload].
 // CRC32 and DataSize are derived from Payload.
 func (f Frame) MarshalBinary() ([]byte, error) {
+	return f.AppendBinary(nil)
+}
+
+// AppendBinary appends a serialized frame to dst, reusing its capacity.
+// The resulting bytes own their payload; they do not alias f.Payload.
+func (f Frame) AppendBinary(dst []byte) ([]byte, error) {
 	if len(f.Payload) > int(^uint16(0)) {
 		return nil, fmt.Errorf("%w: payload too large for frame header", ErrInvalidConfig)
 	}
 	h := f.Header
-	h.DataSize = uint16(len(f.Payload))
+	h.DataSize = uint16(len(f.Payload)) // #nosec G115 -- len(Payload) checked against max uint16 above.
 	h.CRC32 = crc32.ChecksumIEEE(f.Payload)
 
-	out := make([]byte, HeaderSize+len(f.Payload))
+	start := len(dst)
+	if start > int(^uint(0)>>1)-HeaderSize-len(f.Payload) {
+		return nil, fmt.Errorf("weave destination length overflow")
+	}
+	dst = append(dst, make([]byte, HeaderSize+len(f.Payload))...)
+	out := dst[start:]
 	copy(out[0:4], []byte(Magic))
 	out[4] = Version
 	out[5] = byte(h.FrameType)
@@ -54,11 +65,23 @@ func (f Frame) MarshalBinary() ([]byte, error) {
 	binary.BigEndian.PutUint64(out[20:28], h.TotalDataBytes)
 	binary.BigEndian.PutUint32(out[28:32], h.CRC32)
 	copy(out[HeaderSize:], f.Payload)
-	return out, nil
+	return dst, nil
 }
 
 // ParseFrame parses a marshalled frame and ignores trailing transport padding.
 func ParseFrame(packet []byte) (Frame, error) {
+	f, err := ParseFrameView(packet)
+	if err != nil {
+		return Frame{}, err
+	}
+	f.Payload = append([]byte{}, f.Payload...)
+	return f, nil
+}
+
+// ParseFrameView verifies the frame CRC and returns a view into packet.
+// The caller must keep packet unchanged while using the frame. As with
+// ParseFrame, bytes after the declared frame are ignored transport padding.
+func ParseFrameView(packet []byte) (Frame, error) {
 	var f Frame
 	if len(packet) < HeaderSize {
 		return f, fmt.Errorf("weave packet too small")
@@ -83,12 +106,15 @@ func ParseFrame(packet []byte) (Frame, error) {
 	if h.FrameType != FrameTypeData && h.FrameType != FrameTypeRescue {
 		return f, fmt.Errorf("invalid weave frame type: %d", h.FrameType)
 	}
+	if h.TotalDataBytes > MaxPayloadBytes || h.TotalFrames == 0 || h.TotalFrames > maxFrameCount || h.FrameIndex >= h.TotalFrames || h.BlockSize == 0 || h.BlockSize > 255 {
+		return f, fmt.Errorf("weave metadata exceeds core bounds")
+	}
 	if HeaderSize+int(h.DataSize) > len(packet) {
 		return f, fmt.Errorf("weave payload size exceeds packet length")
 	}
 
-	payload := make([]byte, h.DataSize)
-	copy(payload, packet[HeaderSize:HeaderSize+int(h.DataSize)])
+	end := HeaderSize + int(h.DataSize)
+	payload := packet[HeaderSize:end:end]
 	if crc32.ChecksumIEEE(payload) != h.CRC32 {
 		return f, fmt.Errorf("weave crc mismatch")
 	}

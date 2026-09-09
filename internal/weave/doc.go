@@ -1,5 +1,8 @@
 // Package weave implements a transport-agnostic erasure recovery codec.
 //
+// Core validation and buffer improvements are adapted from CHOP (BSD-3-Clause).
+// See THIRD_PARTY_NOTICES.md and licenses/chop.txt at the repository root.
+//
 // Weave is designed for projects that can detect whole-frame or whole-packet
 // failures and want a compact alternative to per-frame Reed-Solomon parity.
 // It splits a byte payload into systematic data frames and adds configurable

@@ -12,6 +12,11 @@ const (
 	HeaderSize         = 32
 	DefaultBlockSize   = 16
 	DefaultRescueCount = 2
+	// MaxPayloadBytes bounds one complete video payload, after compression.
+	// Video carries the whole file, unlike CHOP's smaller storage groups.
+	MaxPayloadBytes   = 256 * 1024 * 1024
+	maxFrameCount     = 1 << 20
+	maxProtectedBytes = 2 * MaxPayloadBytes
 )
 
 var (
@@ -51,8 +56,8 @@ func (c Config) validate() error {
 	if c.DataFramesPerBlock <= 0 || c.DataFramesPerBlock > 255 {
 		return fmt.Errorf("%w: data frames per block must be between 1 and 255", ErrInvalidConfig)
 	}
-	if c.RescueFramesPerBlock <= 0 || c.RescueFramesPerBlock > 255 {
-		return fmt.Errorf("%w: rescue frames per block must be between 1 and 255", ErrInvalidConfig)
+	if c.RescueFramesPerBlock < 0 || c.RescueFramesPerBlock > 255 {
+		return fmt.Errorf("%w: rescue frames per block must be between 0 and 255", ErrInvalidConfig)
 	}
 	if c.DataFramesPerBlock+c.RescueFramesPerBlock > 255 {
 		return fmt.Errorf("%w: data and rescue frames per block must sum to 255 or less", ErrInvalidConfig)
