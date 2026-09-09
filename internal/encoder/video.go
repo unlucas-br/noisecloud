@@ -8,13 +8,14 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"runtime"
 	"sync"
 	"time"
 
 	"encoding/binary"
 	mrand "math/rand"
+
+	"ncc/internal/ffmpeg"
 )
 
 type VideoEncoder struct {
@@ -369,7 +370,10 @@ func (ve *VideoEncoder) drawFrameToBuffer(img *image.RGBA, pixels []MacroPixel) 
 
 // StartFFmpegPipe configura o pipeline do FFmpeg para compressão de vídeo (GPU ou CPU)
 func (ve *VideoEncoder) StartFFmpegPipe(outputPath string, totalFrames int) (*exec.Cmd, io.WriteCloser, *bytes.Buffer, error) {
-	ffmpegPath := findFFmpeg()
+	ffmpegPath, err := ffmpeg.Path()
+	if err != nil {
+		return nil, nil, nil, err
+	}
 	_ = totalFrames
 
 	videoCodec := "libx264"
@@ -499,30 +503,11 @@ func wrapFFmpegError(prefix string, err error, stderr *bytes.Buffer) error {
 	return fmt.Errorf("%s: %w", prefix, err)
 }
 
-func findFFmpeg() string {
-	if path, err := exec.LookPath("ffmpeg"); err == nil {
-		return path
-	}
-
-	locations := []string{
-		`C:\ffmpeg\bin\ffmpeg.exe`,
-		`C:\Program Files\ffmpeg\bin\ffmpeg.exe`,
-		`C:\Program Files (x86)\ffmpeg\bin\ffmpeg.exe`,
-		filepath.Join(os.Getenv("LOCALAPPDATA"), "Microsoft", "WinGet", "Links", "ffmpeg.exe"),
-		filepath.Join(os.Getenv("USERPROFILE"), "scoop", "shims", "ffmpeg.exe"),
-	}
-
-	for _, loc := range locations {
-		if _, err := os.Stat(loc); err == nil {
-			return loc
-		}
-	}
-
-	return "ffmpeg"
-}
-
 func VerifyGPU(gpuType string) error {
-	ffmpegPath := findFFmpeg()
+	ffmpegPath, err := ffmpeg.Path()
+	if err != nil {
+		return err
+	}
 
 	codec := ""
 	if gpuType == "nvidia" {
@@ -554,7 +539,10 @@ func VerifyGPU(gpuType string) error {
 }
 
 func BenchmarkSpeed(gpuType string, width, height, fps int) (float64, error) {
-	ffmpegPath := findFFmpeg()
+	ffmpegPath, err := ffmpeg.Path()
+	if err != nil {
+		return 0, err
+	}
 	codec := "libx264"
 	args := []string{}
 

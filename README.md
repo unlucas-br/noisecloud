@@ -1,4 +1,4 @@
-# NoiseCloud 2.1
+# NoiseCloud 2.1.1
 
 <div align="center">
 
@@ -10,7 +10,7 @@
 /_/ |_/\____/_/____/\___/  \____/_/\____/\__,_/\__,_/
 </pre>
 
-<strong>Version 2.1 by Lucas Ferraz</strong>
+<strong>Version 2.1.1 by Lucas Ferraz</strong>
 
 </div>
 
@@ -28,10 +28,10 @@
     <img alt="Feito em Go" src="https://img.shields.io/badge/Feito%20em-Go-00ADD8?style=for-the-badge&logo=go&logoColor=white">
   </a>
   <a href="https://ffmpeg.org/">
-    <img alt="FFmpeg" src="https://img.shields.io/badge/FFmpeg-required-007808?style=for-the-badge&logo=ffmpeg&logoColor=white">
+    <img alt="FFmpeg" src="https://img.shields.io/badge/FFmpeg-embedded-007808?style=for-the-badge&logo=ffmpeg&logoColor=white">
   </a>
-  <a href="https://github.com/unlucas-br/noisecloud/releases/tag/v2.1">
-    <img alt="Release v2.1" src="https://img.shields.io/badge/release-v2.1-blue?style=for-the-badge">
+  <a href="https://github.com/unlucas-br/noisecloud/releases/tag/v2.1.1">
+    <img alt="Release v2.1.1" src="https://img.shields.io/badge/release-v2.1.1-blue?style=for-the-badge">
   </a>
   <img alt="Licença GPL-3.0" src="https://img.shields.io/badge/licenca-GPL--3.0-black?style=for-the-badge">
 </p>
@@ -42,7 +42,7 @@
 
 <p align="center">
   <a href="#sobre">Sobre</a> |
-  <a href="#novidades-da-21">Novidades da 2.1</a> |
+  <a href="#novidades-da-211">Novidades da 2.1.1</a> |
   <a href="#recursos">Recursos</a> |
   <a href="#uso">Uso</a> |
   <a href="#modo-tiktok">Modo TikTok</a> |
@@ -50,7 +50,7 @@
   <a href="#english">English</a>
 </p>
 
-NoiseCloud 2.1 é uma ferramenta de armazenamento de dados em vídeo por codificação visual. Ela converte arquivos de qualquer formato em frames de ruído visual, para transporte e recuperação posterior em `.mp4`.
+NoiseCloud 2.1.1 é uma ferramenta de armazenamento de dados em vídeo por codificação visual. Ela converte arquivos de qualquer formato em frames de ruído visual, para transporte e recuperação posterior em `.mp4`.
 
 A versão 2.1 incorpora as melhorias do Weave adaptadas do CHOP: validação de metadados, reutilização de buffers e compressão Zstandard. O formato `WEV1`, a proteção `16 + 2` e a leitura de vídeos antigos com Gzip são preservados.
 
@@ -62,11 +62,17 @@ Licença: **GPL-3.0**
 
 ## Sobre
 
-O NoiseCloud 2.1 transforma um arquivo comum em um vídeo `.mp4` com dados codificados visualmente. No código atual, o arquivo é comprimido com Zstandard, empacotado em blocos do motor `Weave 1.0` (`WEV1`), convertido em macropixels de alto contraste e renderizado em vídeo com FFmpeg. No decode, o vídeo é extraído frame a frame, calibrado, reconstruído e descomprimido, até recuperar o arquivo original. Vídeos anteriores com Gzip continuam sendo lidos automaticamente.
+O NoiseCloud 2.1.1 transforma um arquivo comum em um vídeo `.mp4` com dados codificados visualmente. No código atual, o arquivo é comprimido com Zstandard, empacotado em blocos do motor `Weave 1.0` (`WEV1`), convertido em macropixels de alto contraste e renderizado em vídeo com FFmpeg. No decode, o vídeo é extraído frame a frame, calibrado, reconstruído e descomprimido, até recuperar o arquivo original. Vídeos anteriores com Gzip continuam sendo lidos automaticamente.
 
 O projeto não depende de servidor, conta externa ou banco de dados. O uso principal continua sendo local, por terminal, com FFmpeg cuidando da etapa de vídeo.
 
 ---
+
+## Novidades da 2.1.1
+
+- FFmpeg compactado dentro do EXE: baixe apenas o executável e execute.
+- Preparação automática e verificada no cache do usuário, sem instalação, internet ou configuração de PATH.
+- Teste da release com um único EXE, PATH vazio e cache novo.
 
 ## Novidades da 2.1
 
@@ -76,9 +82,9 @@ O projeto não depende de servidor, conta externa ou banco de dados. O uso princ
 - Descompressão em arquivo temporário antes de substituir a saída.
 - Testes de compatibilidade WEV1 e recuperação com frames perdidos.
 
-[Baixar ncc.exe para Windows 64 bits](https://github.com/unlucas-br/noisecloud/releases/download/v2.1/ncc.exe) · [Pacote ZIP e checksums](https://github.com/unlucas-br/noisecloud/releases/tag/v2.1)
+[Baixar ncc.exe para Windows 64 bits](https://github.com/unlucas-br/noisecloud/releases/download/v2.1.1/ncc.exe) · [Pacote ZIP e checksums](https://github.com/unlucas-br/noisecloud/releases/tag/v2.1.1)
 
-Atualize o decoder para ler novos vídeos com Zstandard. O FFmpeg continua necessário.
+Atualize o decoder para ler novos vídeos com Zstandard. O FFmpeg já está incluído no executável 2.1.1.
 
 ## Novidades da 2.0
 
@@ -134,14 +140,7 @@ O executável não deve ser commitado no repositório. Binários públicos devem
 
 ## Pré-requisitos
 
-Para usar o NoiseCloud 2.1, você precisa do FFmpeg instalado e acessível no sistema.
-
-> [!TIP]
-> No Windows, abra o PowerShell como Administrador e instale com:
->
-> ```powershell
-> winget install -e --id Gyan.FFmpeg
-> ```
+Windows 64 bits. O `ncc.exe` da release 2.1.1 já inclui FFmpeg e funciona sem instalação adicional, privilégios de administrador ou internet. No primeiro encode/decode ele prepara aproximadamente 100 MB no cache do usuário; essa cópia é reutilizada nas próximas execuções.
 
 ---
 
@@ -200,16 +199,18 @@ No decode, o reconstrutor detecta a dimensão real do vídeo extraído, recalcul
 - O cabeçalho `WEV1` e a paridade `16 + 2` permanecem iguais. Novos vídeos usam Zstandard com checksum; vídeos e trailers antigos com Gzip continuam compatíveis com o decoder atualizado. Decoders antigos precisam ser atualizados para ler Zstandard.
 - Limites por operação: arquivo original/descomprimido de até **1 GiB**, payload comprimido de até **256 MiB** e até **1.048.576 frames**, incluindo resgates. O limite de frames pode ser atingido antes do limite de bytes, conforme o preset. O limite de 16 MiB por grupo do CHOP não foi imposto ao vídeo inteiro.
 - A descompressão usa arquivo temporário e só substitui a saída depois de validar o fluxo completo. Metadados inconsistentes e duplicatas com conteúdos diferentes causam erro; falhas de CRC são tratadas como frames perdidos.
-- Para compilar o código atual, use **Go 1.25 ou superior**: `go build -o ncc.exe ./cmd/cli`. A [release 2.1](https://github.com/unlucas-br/noisecloud/releases/tag/v2.1) inclui o executável atualizado para Windows.
-- Validação: `go test ./...` e `go vet ./...`. Com FFmpeg no PATH, defina `NCC_TEST_FFMPEG=1` e execute `go test ./cmd/cli -run TestVideoRoundTrip -v` para testar vídeos H.264 reais nos dois presets, inclusive com perda de dois frames.
+- Para compilar o código atual, use **Go 1.25 ou superior**: `go run ./scripts/bundle-ffmpeg` seguido de `go build -tags bundled_ffmpeg -o ncc.exe ./cmd/cli`. A [release 2.1.1](https://github.com/unlucas-br/noisecloud/releases/tag/v2.1.1) inclui o executável atualizado para Windows.
+- Validação: `go test ./...` e `go vet ./...`. Após preparar os assets integrados, defina `NCC_TEST_FFMPEG=1` e execute `go test -tags bundled_ffmpeg ./cmd/cli -run TestVideoRoundTrip -v` para testar vídeos H.264 reais nos dois presets, inclusive com perda de dois frames.
 - O formato `WEV1` organiza o payload em blocos com frames de dados e rescue frames.
 - O preset padrão `weave` usa `640x360`, `MacroSize 8`, `30 fps` e `GrayLevels 2`.
 - O preset TikTok usa `1080x1920`, `MacroSize 45`, `30 fps` e grade vertical dedicada.
 - O decoder tenta ler trailer `WEV1` antes de cair para a reconstrução visual por frames.
 - A barra de calibração ajuda o decoder a estimar preto e branco após compressão H.264.
-- NoiseCloud 2.1 não é criptografia. Para sigilo real, criptografe o arquivo antes do encode.
+- NoiseCloud 2.1.1 não é criptografia. Para sigilo real, criptografe o arquivo antes do encode.
 
 ---
+
+Compilações de desenvolvimento sem `-tags bundled_ffmpeg` continuam aceitando FFmpeg externo. A release completa é testada por `scripts/test-portable.ps1`, sem FFmpeg no PATH.
 
 ## Estrutura do Projeto
 
@@ -243,7 +244,7 @@ GPL-3.0. Veja o arquivo [`LICENSE`](LICENSE).
 
 <p align="center">
   <a href="#about">About</a> |
-  <a href="#whats-new-in-21">What's New in 2.1</a> |
+  <a href="#whats-new-in-211">What's New in 2.1.1</a> |
   <a href="#features">Features</a> |
   <a href="#usage">Usage</a> |
   <a href="#tiktok-mode">TikTok Mode</a> |
@@ -251,7 +252,7 @@ GPL-3.0. Veja o arquivo [`LICENSE`](LICENSE).
   <a href="#portugues">Português</a>
 </p>
 
-NoiseCloud 2.1 is a video-based data storage tool built around visual encoding. It converts files of any format into visual-noise frames, for later transport and recovery through `.mp4` video.
+NoiseCloud 2.1.1 is a video-based data storage tool built around visual encoding. It converts files of any format into visual-noise frames, for later transport and recovery through `.mp4` video.
 
 Version 2.1 incorporates Weave improvements adapted from CHOP: metadata validation, buffer reuse and Zstandard compression. The `WEV1` format, `16 + 2` protection and support for older Gzip videos are preserved.
 
@@ -263,11 +264,17 @@ License: **GPL-3.0**
 
 ## About
 
-NoiseCloud 2.1 turns a regular file into an `.mp4` video containing visually encoded data. In the current source, the file is compressed with Zstandard, packed into `Weave 1.0` (`WEV1`) blocks, converted into high-contrast macropixels and rendered to video through FFmpeg. During decode, the video is extracted frame by frame, calibrated, reconstructed and decompressed, until the original file is recovered. Older Gzip videos are still read automatically.
+NoiseCloud 2.1.1 turns a regular file into an `.mp4` video containing visually encoded data. In the current source, the file is compressed with Zstandard, packed into `Weave 1.0` (`WEV1`) blocks, converted into high-contrast macropixels and rendered to video through FFmpeg. During decode, the video is extracted frame by frame, calibrated, reconstructed and decompressed, until the original file is recovered. Older Gzip videos are still read automatically.
 
 The project does not depend on a server, external account or database. The main workflow remains local and terminal-based.
 
 ---
+
+## What's New in 2.1.1
+
+- FFmpeg compressed inside the EXE: download just the executable and run it.
+- Automatic, verified extraction into the user cache, without an installer, internet access or PATH changes.
+- Release tested using a single EXE with an empty PATH and a fresh cache.
 
 ## What's New in 2.1
 
@@ -277,9 +284,9 @@ The project does not depend on a server, external account or database. The main 
 - Decompression to a temporary file before replacing the destination.
 - WEV1 compatibility and recovery tests with missing frames.
 
-[Download ncc.exe for 64-bit Windows](https://github.com/unlucas-br/noisecloud/releases/download/v2.1/ncc.exe) · [ZIP package and checksums](https://github.com/unlucas-br/noisecloud/releases/tag/v2.1)
+[Download ncc.exe for 64-bit Windows](https://github.com/unlucas-br/noisecloud/releases/download/v2.1.1/ncc.exe) · [ZIP package and checksums](https://github.com/unlucas-br/noisecloud/releases/tag/v2.1.1)
 
-Update the decoder to read new Zstandard videos. FFmpeg is still required.
+Update the decoder to read new Zstandard videos. FFmpeg is included in the 2.1.1 executable.
 
 ## What's New in 2.0
 
@@ -335,14 +342,7 @@ The executable should not be committed to the repository. Public binaries should
 
 ## Requirements
 
-NoiseCloud 2.1 requires FFmpeg installed and available on the system.
-
-> [!TIP]
-> On Windows, open PowerShell as Administrator and install it with:
->
-> ```powershell
-> winget install -e --id Gyan.FFmpeg
-> ```
+64-bit Windows. The 2.1.1 release `ncc.exe` includes FFmpeg and needs no additional installation, administrator privileges or internet connection. On first encode/decode it prepares approximately 100 MB in the user cache, reused on subsequent runs.
 
 ---
 
@@ -403,16 +403,18 @@ During decode, the reconstructor detects the real extracted video size, recalcul
 - The `WEV1` header and `16 + 2` parity remain unchanged. New videos use Zstandard with a checksum; older Gzip videos and trailers remain readable by the updated decoder. Older decoders must be updated to read Zstandard.
 - Per-operation limits: **1 GiB** original/decompressed file, **256 MiB** compressed payload and **1,048,576 frames**, including rescue frames. Depending on the preset, the frame limit may be reached first. CHOP's 16 MiB storage-group limit is not applied to an entire video.
 - Decompression writes to a temporary file and replaces the destination only after validating the complete stream. Inconsistent metadata and conflicting duplicates fail; CRC failures are treated as lost frames.
-- Build the current source with **Go 1.25 or later**: `go build -o ncc.exe ./cmd/cli`. The [2.1 release](https://github.com/unlucas-br/noisecloud/releases/tag/v2.1) includes the updated Windows executable.
-- Validation: `go test ./...` and `go vet ./...`. With FFmpeg on PATH, set `NCC_TEST_FFMPEG=1` and run `go test ./cmd/cli -run TestVideoRoundTrip -v` to test real H.264 videos with both presets, including two lost frames.
+- Build the current source with **Go 1.25 or later**: `go run ./scripts/bundle-ffmpeg` followed by `go build -tags bundled_ffmpeg -o ncc.exe ./cmd/cli`. The [2.1.1 release](https://github.com/unlucas-br/noisecloud/releases/tag/v2.1.1) includes the updated Windows executable.
+- Validation: `go test ./...` and `go vet ./...`. After preparing the embedded assets, set `NCC_TEST_FFMPEG=1` and run `go test -tags bundled_ffmpeg ./cmd/cli -run TestVideoRoundTrip -v` to test real H.264 videos with both presets, including two lost frames.
 - The `WEV1` format organizes payload into blocks with data frames and rescue frames.
 - The default `weave` preset uses `640x360`, `MacroSize 8`, `30 fps` and `GrayLevels 2`.
 - The TikTok preset uses `1080x1920`, `MacroSize 45`, `30 fps` and a dedicated vertical grid.
 - The decoder attempts to read a `WEV1` trailer before falling back to visual frame reconstruction.
 - The calibration bar helps the decoder estimate black and white levels after H.264 compression.
-- NoiseCloud 2.1 is not encryption. For real secrecy, encrypt the file before encoding it.
+- NoiseCloud 2.1.1 is not encryption. For real secrecy, encrypt the file before encoding it.
 
 ---
+
+Development builds without `-tags bundled_ffmpeg` still support external FFmpeg. The complete release is tested by `scripts/test-portable.ps1` without FFmpeg on PATH.
 
 ## Project Structure
 

@@ -30,3 +30,8 @@ go.work.sum
 # Editor/IDE
 # .idea/
 # .vscode/
+
+# Runtime assets are verified and embedded during release builds.
+/internal/ffmpeg/assets/*
+!/internal/ffmpeg/assets/.gitkeep
+/dist/

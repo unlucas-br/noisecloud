@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os/exec"
 
+	"ncc/internal/ffmpeg"
 	"ncc/internal/weave"
 )
 
@@ -15,7 +16,10 @@ func (ve *VideoEncoder) EncodePayloadsWeaveTrailer(payloads []Payload, outputPat
 	payload := payloads[0].Data
 	_ = payload
 
-	ffmpegPath := findFFmpeg()
+	ffmpegPath, err := ffmpeg.Path()
+	if err != nil {
+		return err
+	}
 	args := []string{
 		"-hide_banner",
 		"-loglevel", "error",

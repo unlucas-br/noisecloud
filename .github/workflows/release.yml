@@ -45,6 +45,12 @@ jobs:
         run: go test ./...
       - name: Vet
         run: go vet ./...
+      - name: Prepare embedded FFmpeg
+        run: go run ./scripts/bundle-ffmpeg
+      - name: Test embedded runtime
+        env:
+          NCC_TEST_FFMPEG: '1'
+        run: go test -tags bundled_ffmpeg ./...
       - name: Build Windows executable
         env:
           GOOS: windows
@@ -52,8 +58,11 @@ jobs:
           CGO_ENABLED: '0'
         run: |
           New-Item -ItemType Directory -Path dist -Force | Out-Null
-          go build -trimpath -ldflags='-s -w' -o dist/ncc.exe ./cmd/cli
+          go build -tags bundled_ffmpeg -trimpath -ldflags='-s -w' -o dist/ncc.exe ./cmd/cli
           if ($LASTEXITCODE -ne 0) { throw 'Build failed' }
+
+      - name: Test single executable without PATH
+        run: ./scripts/test-portable.ps1 -Executable dist/ncc.exe
 
       - name: Package and checksum
         run: |
@@ -61,6 +70,8 @@ jobs:
           New-Item -ItemType Directory -Path "dist/$package" -Force | Out-Null
           Copy-Item dist/ncc.exe, README.md, LICENSE, THIRD_PARTY_NOTICES.md "dist/$package/"
           Copy-Item licenses "dist/$package/licenses" -Recurse
+          Copy-Item internal/ffmpeg/assets/LICENSE.txt "dist/$package/licenses/ffmpeg.txt"
+          Copy-Item internal/ffmpeg/assets/README.txt "dist/$package/licenses/ffmpeg-build.txt"
           Copy-Item "releases/$env:RELEASE_TAG.md" "dist/$package/RELEASE.md"
           Compress-Archive -Path "dist/$package/*" -DestinationPath "dist/$package.zip"
           $lines = foreach ($name in @('ncc.exe', "$package.zip")) {

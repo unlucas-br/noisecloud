@@ -3,12 +3,12 @@ package main
 import (
 	"bytes"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
 
 	"ncc/internal/decoder"
 	"ncc/internal/encoder"
+	"ncc/internal/ffmpeg"
 )
 
 // Enable explicitly: NCC_TEST_FFMPEG=1 go test ./cmd/cli -run TestVideoRoundTrip.
@@ -16,7 +16,7 @@ func TestVideoRoundTrip(t *testing.T) {
 	if os.Getenv("NCC_TEST_FFMPEG") != "1" {
 		t.Skip("set NCC_TEST_FFMPEG=1 for real H.264 video tests")
 	}
-	if _, err := exec.LookPath("ffmpeg"); err != nil {
+	if _, err := ffmpeg.Path(); err != nil {
 		t.Fatal("FFmpeg required:", err)
 	}
 	want := make([]byte, 1100)
